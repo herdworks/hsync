@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"errors"
@@ -11,9 +11,8 @@ import (
 func TestInitializeAndLoadLocalManifest(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
-	manifestPath := filepath.Join(workspace, ".sync", "manifest.json")
-	repository := Repository{ManifestPath: manifestPath}
-	raw, id, err := repository.Initialize("/.hypersync/revision.json", ScanConfig{Include: Rules{Paths: []string{"content/**"}}})
+	repository := Repository{Root: workspace}
+	raw, id, err := repository.Initialize("/.hsync/revision.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -21,10 +20,13 @@ func TestInitializeAndLoadLocalManifest(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(loadedRaw) != string(raw) || loadedID != id || manifest.SyncPath != "/.hypersync/revision.json" {
+	if string(loadedRaw) != string(raw) || loadedID != id || manifest.SyncPath != "/.hsync/revision.json" {
 		t.Fatalf("loaded local base differs: %q %s %#v", loadedRaw, loadedID, manifest)
 	}
-	_, _, err = repository.Initialize("/.hypersync/revision.json", ScanConfig{Include: Rules{Paths: []string{"content/**"}}})
+	if _, err := os.Stat(filepath.Join(workspace, LocalManifestPath)); err != nil {
+		t.Fatalf("local manifest was not written to the standard path: %v", err)
+	}
+	_, _, err = repository.Initialize("/.hsync/revision.json")
 	if !IsAlreadyInitialized(err) {
 		t.Fatalf("second initialization error = %v, want os.ErrExist", err)
 	}
@@ -33,8 +35,8 @@ func TestInitializeAndLoadLocalManifest(t *testing.T) {
 func TestFinalizePreservesCandidateBytes(t *testing.T) {
 	t.Parallel()
 	workspace := t.TempDir()
-	manifestPath := filepath.Join(workspace, ".sync", "manifest.json")
-	repository := Repository{ManifestPath: manifestPath}
+	manifestPath := filepath.Join(workspace, LocalManifestPath)
+	repository := Repository{Root: workspace}
 	candidateRaw, candidateID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
@@ -57,9 +59,7 @@ func TestFinalizePreservesCandidateBytes(t *testing.T) {
 
 func TestFinalizeRejectsDifferentPublishedCandidate(t *testing.T) {
 	t.Parallel()
-	workspace := t.TempDir()
-	manifestPath := filepath.Join(workspace, "manifest.json")
-	repository := Repository{ManifestPath: manifestPath}
+	repository := Repository{}
 	raw, id, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)

@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Sync is one HyperSync unit of work. Prepare reads and reconciles state then
+// Sync is one hsync unit of work. Prepare reads and reconciles state then
 // applies a non-empty changeset to Payload. Finalize advances Repository only
 // after its caller has deployed that payload successfully.
 type Sync struct {
@@ -28,7 +28,7 @@ type SyncStatus struct {
 }
 
 // Status describes the completed stage of a Sync. Provider outcomes remain
-// external because HyperSync performs no provider writes.
+// external because hsync performs no provider writes.
 type Status string
 
 const (
@@ -41,9 +41,8 @@ const (
 // Prepare reconciles Repository with authoritative remote state, then writes a
 // non-empty changeset beneath Payload. It performs no provider writes.
 //
-// A manifest with scanner configuration is scanned directly from sourceRoot.
-// A manifest without configuration is owned by an aware caller, which must
-// provide snapshot explicitly.
+// Repository.Config controls optional discovery; without it, synchronization
+// uses only the files already tracked by the local manifest.
 func (sync *Sync) Prepare(ctx context.Context) error {
 	if sync == nil {
 		return fmt.Errorf("%w: sync is required", ErrInvalidState)
@@ -56,7 +55,7 @@ func (sync *Sync) Prepare(ctx context.Context) error {
 	if sync.Remote.SyncPath != base.SyncPath {
 		return fmt.Errorf("%w: remote sync_path %q differs from local manifest %q", ErrManualResolution, sync.Remote.SyncPath, base.SyncPath)
 	}
-	local, err := sync.Repository.workspaceSnapshot(base.Config, sync.Payload)
+	local, err := sync.Repository.snapshot(&base)
 	if err != nil {
 		return err
 	}
@@ -161,7 +160,7 @@ func initialChangeset(base Manifest, snapshot Snapshot) (Changeset, error) {
 		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
-	manifest := Manifest{Version: Version, SyncPath: base.SyncPath, Config: base.Config, Entries: entries}
+	manifest := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: entries}
 	raw, id, err := SerializeManifest(manifest)
 	if err != nil {
 		return Changeset{}, err

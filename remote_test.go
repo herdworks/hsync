@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"context"
@@ -52,6 +52,28 @@ func TestRemoteTreatsSyncPathAsHostAbsolute(t *testing.T) {
 	reader := Remote{BaseURL: base, SyncPath: "/.sync/latest.json"}
 	if _, err := reader.ReadIndex(context.Background()); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestRemoteReadsAndVerifiesBlob(t *testing.T) {
+	contents := []byte("blob contents")
+	id := NewIdentifier(contents)
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path != "/.sync/blobs/"+id.Filename() {
+			http.NotFound(writer, request)
+			return
+		}
+		_, _ = writer.Write(contents)
+	}))
+	defer server.Close()
+	base, _ := url.Parse(server.URL)
+	reader := Remote{BaseURL: base, SyncPath: "/.sync/latest.json"}
+	got, err := reader.ReadBlob(context.Background(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(contents) {
+		t.Fatalf("blob = %q, want %q", got, contents)
 	}
 }
 

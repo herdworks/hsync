@@ -1,14 +1,13 @@
-# HyperSync Go
+# hsync
 
-HyperSync is a manifest/blob reconciliation engine for static-site source
-workspaces. It reads published synchronization state over ordinary HTTP,
+hsync is an HTTP sync tool. It reads synchronization state over ordinary HTTP,
 reconciles local changes, and writes provider-neutral changeset files into an
 existing deployable payload directory.
 
-HyperSync does not import or write through HyperProviders. A deployment layer
-performs conditional writes, uploads immutable blobs and manifests, and
-publishes the mutable synchronization index last. HyperTexting owns the normal
-build → prepare → deploy → finalize orchestration.
+The low-level reconciliation API is provider-neutral. `Deployment` creates an
+hsync-enabled HyperProviders deployment: it prepares sync state, performs
+conditional writes, uploads immutable blobs and manifests, and publishes the
+mutable synchronization index last.
 
 ## Storage model
 
@@ -43,24 +42,51 @@ redundant revision. `Sync.Status` reports `prepared`, `noop`, `adopted`, or
 
 ## Standalone CLI
 
-The `hypersync` command supports HyperSync-unaware static-site generators and
-CI pipelines:
+The `hsync` command manages downloaded checkouts:
 
 ```text
-hypersync init \
-  --manifest .sync/manifest.json \
-  --sync-path /.hypersync/revision.json \
-  --include site.yaml,content/**,data/**,static/** \
-  --max-file-size 5MB
-
-hypersync reconcile \
-  --source . \
-  --manifest .sync/manifest.json \
-  --build builds/release \
-  --base-url https://example.com/
+hsync download https://example.com/ ./checkout
+hsync status ./checkout --config hsync.yaml
+hsync pull ./checkout --config hsync.yaml
+hsync reset ./checkout --config hsync.yaml
+hsync push ./checkout --environment production
 ```
 
-`reconcile` writes immutable changeset objects and `.deployment.json` into the
-payload directory. The selected deployment layer must honor those instructions,
-then the calling workflow must finalize the local manifest after it verifies a
-clean published index.
+`download` treats a non-root URL as a direct synchronization endpoint. For a
+root URL, it first tries `/.hsync/index.json`, then falls back to a website
+discovery link. It writes the checkout's base to `.hsync/manifest.json`, but
+never creates a configuration file. A usable repository must contain a root
+configuration file with `sync.remote`; normally that file is one of the
+downloaded source files. `status` reports local changes from that checkout's current base, and
+`pull` incorporates a newer published revision without replacing conflicting
+local work. Use `push` with a generic provider configuration to publish a
+checkout. The configuration can be any YAML or JSON document with top-level
+`providers`, `environments`, and `sync` keys; hsync ignores unrelated keys and
+has no default scanner policy. Existing manifest entries form the initial
+managed set. `sync.include` only selects additional files to discover; an
+omitted or empty `sync.include` discovers nothing. `sync.ignore` then excludes
+matching entries from the complete managed set, including manifest entries.
+Include paths must remain below the repository root. Root-wide patterns such
+as `.`, `*`, and `**` are rejected; use an explicit subtree such as
+`content/**` when selecting a whole tree.
+
+`push` requires its checkout directory to be the directory containing the
+configuration file. It treats that directory as the deployment payload:
+hsync prepares any configured synchronization artifacts and HyperProviders
+deploys the payload according to the selected environment or explicit provider
+names. HyperProviders never deploys its local `.deployment` staging directory.
+
+`reset` restores missing or modified files tracked by the checkout's local
+manifest, using immutable blobs from `sync.remote`. It never pulls newer state
+or deletes untracked local files. Pass `--interactive` to choose each tracked
+file to restore.
+
+Commands resolve configuration with `--config`, then `HSYNC_CONFIG`, then one
+of `hsync.yaml`, `hsync.json`, `.hsync.yaml`, or `.hsync.json` at the
+repository root. A configuration is required for `status`, `pull`, `reset`,
+and `push`.
+
+Manifests contain only immutable synchronization state and are always stored
+locally at `.hsync/manifest.json`. `SyncConfig` is external policy: `remote`,
+`include`, `ignore`, and either the human-readable `max_file_size` or
+normalized `max_file_bytes` limit.

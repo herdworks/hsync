@@ -1,0 +1,174 @@
+package hsync
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"os"
+	"sort"
+	"time"
+)
+
+// PullResult describes incorporation of a newer published revision.
+type PullResult struct {
+	IndexURL   string
+	ManifestID Identifier
+	Status     string
+}
+
+// PullOptions controls optional pull behavior.
+type PullOptions struct {
+	Client *http.Client
+	Output io.Writer
+}
+
+// Pull merges the current clean remote revision into a configured checkout.
+// Remote-only changes are materialized while local changes win conflicts.
+func Pull(ctx context.Context, directory string, config SyncConfig, client *http.Client) (PullResult, error) {
+	return PullWithOptions(ctx, directory, config, PullOptions{Client: client})
+}
+
+// PullWithOptions merges the current clean remote revision into a configured
+// checkout. When Output is non-nil, it receives download progress lines.
+func PullWithOptions(ctx context.Context, directory string, config SyncConfig, options PullOptions) (PullResult, error) {
+	repository, remote, err := OpenCheckout(directory, config, options.Client)
+	if err != nil {
+		return PullResult{}, err
+	}
+	_, baseID, base, err := repository.LoadManifest()
+	if err != nil {
+		return PullResult{}, err
+	}
+	indexRaw, err := remote.ReadIndex(ctx)
+	if err != nil {
+		return PullResult{}, err
+	}
+	index, err := ParseIndex(indexRaw)
+	if err != nil {
+		return PullResult{}, err
+	}
+	if err := index.PendingError(time.Now().UTC()); err != nil {
+		return PullResult{}, err
+	}
+	if index.Published == baseID {
+		return PullResult{IndexURL: remote.BaseURL.String() + remote.SyncPath, ManifestID: baseID, Status: "noop"}, nil
+	}
+	if err := VerifyContinuation(ctx, remote, baseID, index.Published); err != nil {
+		return PullResult{}, err
+	}
+	liveRaw, err := remote.ReadManifest(ctx, index.Published)
+	if err != nil {
+		return PullResult{}, err
+	}
+	live, err := ParseManifest(liveRaw, index.Published)
+	if err != nil {
+		return PullResult{}, err
+	}
+	repository.Config = &config
+	workspace, err := repository.snapshot(&base)
+	if err != nil {
+		return PullResult{}, err
+	}
+	plan := remoteSelections(base, live, workspace)
+	downloads := make([]ManifestEntry, 0, len(plan.materialize))
+	for _, selection := range plan.materialize {
+		if selection.liveOK {
+			downloads = append(downloads, selection.live)
+		}
+	}
+	if err := writeDownloadProgress(options.Output, "downloading %d/%d files (%s)", len(downloads), len(live.Entries), humanSize(entriesSize(downloads))); err != nil {
+		return PullResult{}, err
+	}
+	for _, path := range plan.skipped {
+		if err := writeDownloadProgress(options.Output, "file %s skipped", path); err != nil {
+			return PullResult{}, err
+		}
+	}
+	downloadStarted := time.Now()
+	if err := materializeRemoteSelections(ctx, directory, downloads, plan.materialize, remote, options.Output); err != nil {
+		return PullResult{}, err
+	}
+	if err := writeDownloadProgress(options.Output, "downloaded %d files in %.3f seconds", len(downloads), time.Since(downloadStarted).Seconds()); err != nil {
+		return PullResult{}, err
+	}
+	if err := repository.Finalize(Changeset{ManifestID: index.Published, Manifest: liveRaw}, indexRaw, time.Now().UTC()); err != nil {
+		return PullResult{}, err
+	}
+	return PullResult{IndexURL: remote.BaseURL.String() + remote.SyncPath, ManifestID: index.Published, Status: "updated"}, nil
+}
+
+type remoteSelection struct {
+	path   string
+	live   ManifestEntry
+	liveOK bool
+}
+
+type pullPlan struct {
+	materialize []remoteSelection
+	skipped     []string
+}
+
+func remoteSelections(base, live Manifest, workspace Snapshot) pullPlan {
+	baseEntries, liveEntries := entriesByPath(base.Entries), entriesByPath(live.Entries)
+	paths := map[string]struct{}{}
+	for name := range baseEntries {
+		paths[name] = struct{}{}
+	}
+	for name := range liveEntries {
+		paths[name] = struct{}{}
+	}
+	for name := range workspace.Entries {
+		paths[name] = struct{}{}
+	}
+	ordered := make([]string, 0, len(paths))
+	for name := range paths {
+		ordered = append(ordered, name)
+	}
+	sort.Strings(ordered)
+	plan := pullPlan{materialize: make([]remoteSelection, 0, len(ordered))}
+	for _, name := range ordered {
+		baseEntry, baseOK := baseEntries[name]
+		workspaceEntry, workspaceOK := workspace.Entries[name]
+		liveEntry, liveOK := liveEntries[name]
+		workspaceChanged := !entriesEqual(workspaceEntry, workspaceOK, baseEntry, baseOK)
+		liveChanged := !entriesEqual(liveEntry, liveOK, baseEntry, baseOK)
+		if workspaceChanged {
+			if liveChanged && !entriesEqual(workspaceEntry, workspaceOK, liveEntry, liveOK) {
+				plan.skipped = append(plan.skipped, name)
+			}
+			continue
+		}
+		if entriesEqual(workspaceEntry, workspaceOK, liveEntry, liveOK) {
+			continue
+		}
+		plan.materialize = append(plan.materialize, remoteSelection{path: name, live: liveEntry, liveOK: liveOK})
+	}
+	return plan
+}
+
+func materializeRemoteSelections(ctx context.Context, root string, downloads []ManifestEntry, selections []remoteSelection, remote Remote, output io.Writer) error {
+	if err := downloadEntries(ctx, root, remote, downloads, output); err != nil {
+		return err
+	}
+	for _, selection := range selections {
+		if selection.liveOK {
+			continue
+		}
+		filename, err := safeWriteTarget(root, selection.path)
+		if err != nil {
+			return err
+		}
+		if err := os.Remove(filename); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func entriesSize(entries []ManifestEntry) int64 {
+	var total int64
+	for _, entry := range entries {
+		total += entry.Size
+	}
+	return total
+}

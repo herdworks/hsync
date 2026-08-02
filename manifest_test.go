@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"errors"
@@ -8,7 +8,7 @@ import (
 func TestSerializeManifestUsesExactBytes(t *testing.T) {
 	t.Parallel()
 
-	manifest := Manifest{Version: Version, SyncPath: "/.hypersync/revision.json", Entries: []ManifestEntry{}}
+	manifest := Manifest{Version: Version, SyncPath: "/.hsync/revision.json", Entries: []ManifestEntry{}}
 	raw, id, err := SerializeManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -39,15 +39,14 @@ func TestParseManifestRejectsTrailingValue(t *testing.T) {
 	}
 }
 
-func TestManifestValidateRejectsNonconformingEntry(t *testing.T) {
+func TestManifestValidationDoesNotUseExternalSyncRules(t *testing.T) {
 	t.Parallel()
 
 	manifest := Manifest{
 		Version: Version, SyncPath: "/.sync/latest.json",
-		Config:  &ScanConfig{Include: Rules{Paths: []string{"content/**"}}},
 		Entries: []ManifestEntry{{Path: "data/site.yaml", Blob: NewIdentifier([]byte("site")), Size: 4, Mimetype: "application/yaml"}},
 	}
-	if err := manifest.Validate(); !errors.Is(err, ErrInvalidState) {
-		t.Fatalf("Validate() error = %v, want invalid state", err)
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("Validate() error = %v", err)
 	}
 }

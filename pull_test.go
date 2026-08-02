@@ -1,0 +1,183 @@
+package hsync
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestPullUsesConcurrentDownloadProgress(t *testing.T) {
+	checkout := t.TempDir()
+	before, after := []byte("before"), []byte("after")
+	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
+	baseRaw, baseID, err := SerializeManifest(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := Manifest{Version: Version, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
+	liveRaw, liveID, err := SerializeManifest(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.sync/latest.json":
+			_, _ = w.Write(indexRaw)
+		case "/.sync/manifests/" + liveID.Filename() + ".json":
+			_, _ = w.Write(liveRaw)
+		case "/.sync/blobs/" + NewIdentifier(after).Filename():
+			_, _ = w.Write(after)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	control := filepath.Join(checkout, ".hsync")
+	if err := os.MkdirAll(control, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(control, "manifest.json"), baseRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCheckoutFile(checkout, "content/message.txt", before); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	result, err := PullWithOptions(context.Background(), checkout, SyncConfig{Remote: server.URL + "/.sync/latest.json"}, PullOptions{Client: server.Client(), Output: &output})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != "updated" || result.ManifestID != liveID {
+		t.Fatalf("result = %#v", result)
+	}
+	lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
+	want := []string{
+		"downloading 1/1 files (0.0 KB)",
+		"file content/message.txt downloading",
+		"file content/message.txt downloaded",
+	}
+	if len(lines) != len(want)+1 {
+		t.Fatalf("progress lines = %q", output.String())
+	}
+	for index, line := range want {
+		if lines[index] != line {
+			t.Fatalf("progress line %d = %q, want %q", index, lines[index], line)
+		}
+	}
+	if !regexp.MustCompile(`^downloaded 1 files in [0-9]+\.[0-9]{3} seconds$`).MatchString(lines[3]) {
+		t.Fatalf("final progress line = %q", lines[3])
+	}
+}
+
+func TestPullPlanReportsOnlyDivergentLocalWinsFilesAsSkipped(t *testing.T) {
+	base := Manifest{Entries: []ManifestEntry{
+		{Path: "conflict.txt", Blob: NewIdentifier([]byte("base"))},
+		{Path: "local.txt", Blob: NewIdentifier([]byte("base"))},
+		{Path: "remote.txt", Blob: NewIdentifier([]byte("base"))},
+	}}
+	live := Manifest{Entries: []ManifestEntry{
+		{Path: "conflict.txt", Blob: NewIdentifier([]byte("remote"))},
+		{Path: "local.txt", Blob: NewIdentifier([]byte("base"))},
+		{Path: "remote.txt", Blob: NewIdentifier([]byte("remote"))},
+	}}
+	workspace := Snapshot{Entries: map[string]ManifestEntry{
+		"conflict.txt": {Path: "conflict.txt", Blob: NewIdentifier([]byte("local"))},
+		"local.txt":    {Path: "local.txt", Blob: NewIdentifier([]byte("local"))},
+		"remote.txt":   {Path: "remote.txt", Blob: NewIdentifier([]byte("base"))},
+	}}
+	plan := remoteSelections(base, live, workspace)
+	if len(plan.skipped) != 1 || plan.skipped[0] != "conflict.txt" {
+		t.Fatalf("skipped = %#v, want [conflict.txt]", plan.skipped)
+	}
+	if len(plan.materialize) != 1 || plan.materialize[0].path != "remote.txt" {
+		t.Fatalf("materialize = %#v, want remote.txt", plan.materialize)
+	}
+}
+
+func TestPullFailureDoesNotAdvanceLocalBase(t *testing.T) {
+	checkout := t.TempDir()
+	before, after := []byte("before"), []byte("after")
+	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
+	baseRaw, baseID, err := SerializeManifest(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := Manifest{Version: Version, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
+	liveRaw, liveID, err := SerializeManifest(live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.sync/latest.json":
+			_, _ = w.Write(indexRaw)
+		case "/.sync/manifests/" + liveID.Filename() + ".json":
+			_, _ = w.Write(liveRaw)
+		case "/.sync/manifests/" + baseID.Filename() + ".json":
+			_, _ = w.Write(baseRaw)
+		case "/.sync/blobs/" + NewIdentifier(after).Filename():
+			_, _ = w.Write([]byte("corrupt"))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	if err := os.MkdirAll(filepath.Join(checkout, ".hsync"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifestPath := filepath.Join(checkout, LocalManifestPath)
+	if err := os.WriteFile(manifestPath, baseRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCheckoutFile(checkout, "content/message.txt", before); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Pull(context.Background(), checkout, SyncConfig{Remote: server.URL + "/.sync/latest.json"}, server.Client()); err == nil {
+		t.Fatal("Pull() error = nil for corrupt blob")
+	}
+	got, err := os.ReadFile(manifestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(baseRaw) {
+		t.Fatalf("local base advanced after failed pull: %q", got)
+	}
+	contents, err := os.ReadFile(filepath.Join(checkout, "content", "message.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(contents) != string(before) {
+		t.Fatalf("workspace changed after failed pull: %q", contents)
+	}
+}
+
+func TestSafeCheckoutTargetRejectsSymlinkAncestor(t *testing.T) {
+	root := t.TempDir()
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(root, "content")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+	_, err := safeWriteTarget(root, "content/page.txt")
+	if err == nil {
+		t.Fatal("safeWriteTarget() error = nil")
+	}
+	if _, err := os.Stat(filepath.Join(outside, "page.txt")); !os.IsNotExist(err) {
+		t.Fatalf("materialization escaped checkout: %v", err)
+	}
+}

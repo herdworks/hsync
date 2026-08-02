@@ -1,6 +1,7 @@
-package hypersync
+package hsync
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -11,11 +12,11 @@ func TestChangesetApplyInitializesPendingIndex(t *testing.T) {
 	t.Parallel()
 	build := t.TempDir()
 	blob := []byte("post")
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.hypersync/revision.json", Entries: []ManifestEntry{}})
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.hsync/revision.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	changeset, err := completeChangeset(Changeset{Manifest: manifestRaw, ManifestID: manifestID, Blobs: map[Identifier][]byte{NewIdentifier(blob): blob}, syncPath: "/.hypersync/revision.json"}, nil, time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC))
+	changeset, err := completeChangeset(Changeset{Manifest: manifestRaw, ManifestID: manifestID, Blobs: map[Identifier][]byte{NewIdentifier(blob): blob}, syncPath: "/.hsync/revision.json"}, nil, time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,14 +33,14 @@ func TestChangesetApplyInitializesPendingIndex(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(build, ".deployment", "expected.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected initial expected.json to be absent, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(build, ".hypersync", "manifests", changeset.ManifestID.Filename()+".json")); err != nil {
+	if _, err := os.Stat(filepath.Join(build, ".hsync", "manifests", changeset.ManifestID.Filename()+".json")); err != nil {
 		t.Fatal(err)
 	}
 	for filename, want := range map[string][]byte{
-		filepath.Join(".hypersync", "manifests", changeset.ManifestID.Filename()+".json"): changeset.Manifest,
-		filepath.Join(".deployment", "pending.json"):                                      changeset.PendingIndex,
-		filepath.Join(".hypersync", "revision.json"):                                      changeset.CleanIndex,
-		".deployment.json": changeset.Instructions,
+		filepath.Join(".hsync", "manifests", changeset.ManifestID.Filename()+".json"): changeset.Manifest,
+		filepath.Join(".deployment", "pending.json"):                                  changeset.PendingIndex,
+		filepath.Join(".hsync", "revision.json"):                                      changeset.CleanIndex,
+		".deployment.json":                                                            changeset.Instructions,
 	} {
 		got, err := os.ReadFile(filepath.Join(build, filename))
 		if err != nil {
@@ -49,12 +50,21 @@ func TestChangesetApplyInitializesPendingIndex(t *testing.T) {
 			t.Fatalf("%s bytes = %q, want %q", filename, got, want)
 		}
 	}
-	gotBlob, err := os.ReadFile(filepath.Join(build, ".hypersync", "blobs", NewIdentifier(blob).Filename()))
+	gotBlob, err := os.ReadFile(filepath.Join(build, ".hsync", "blobs", NewIdentifier(blob).Filename()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if string(gotBlob) != string(blob) {
 		t.Fatalf("blob bytes = %q, want %q", gotBlob, blob)
+	}
+	var instructions struct {
+		Ignore []string `json:"ignore"`
+	}
+	if err := json.Unmarshal(changeset.Instructions, &instructions); err != nil {
+		t.Fatal(err)
+	}
+	if len(instructions.Ignore) != 1 || instructions.Ignore[0] != ".deployment/" {
+		t.Fatalf("instructions ignore = %#v, want [.deployment/]", instructions.Ignore)
 	}
 }
 

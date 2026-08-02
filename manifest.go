@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"bytes"
@@ -26,7 +26,6 @@ type Manifest struct {
 	Version  int             `json:"version"`
 	Parent   Identifier      `json:"parent,omitempty"`
 	SyncPath string          `json:"sync_path"`
-	Config   *ScanConfig     `json:"config,omitempty"`
 	Entries  []ManifestEntry `json:"entries"`
 }
 
@@ -36,19 +35,6 @@ type ManifestEntry struct {
 	Blob     Identifier `json:"blob"`
 	Size     int64      `json:"size"`
 	Mimetype string     `json:"mimetype"`
-}
-
-// ScanConfig selects locally managed source files when present.
-type ScanConfig struct {
-	Include     Rules `json:"include"`
-	Ignore      Rules `json:"ignore"`
-	MaxFileSize int64 `json:"max_file_size,omitempty"`
-}
-
-// Rules contains optional path and MIME glob constraints.
-type Rules struct {
-	Paths     []string `json:"paths"`
-	Mimetypes []string `json:"mimetypes"`
 }
 
 const Version = 1
@@ -66,11 +52,6 @@ func (manifest Manifest) Validate() error {
 			return err
 		}
 	}
-	if manifest.Config != nil {
-		if err := manifest.Config.Validate(); err != nil {
-			return err
-		}
-	}
 	seen := make(map[string]struct{}, len(manifest.Entries))
 	for _, entry := range manifest.Entries {
 		if err := entry.Validate(); err != nil {
@@ -80,9 +61,6 @@ func (manifest Manifest) Validate() error {
 			return fmt.Errorf("%w: duplicate entry path %q", ErrInvalidState, entry.Path)
 		}
 		seen[entry.Path] = struct{}{}
-		if manifest.Config != nil && !manifest.Config.Allows(entry) {
-			return fmt.Errorf("%w: entry %q violates its manifest configuration", ErrInvalidState, entry.Path)
-		}
 	}
 	return nil
 }
@@ -162,15 +140,22 @@ func ParseManifest(raw []byte, expected Identifier) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("%w: manifest digest is %s, want %s", ErrInvalidState, got, expected)
 	}
 
-	var manifest Manifest
+	var wire struct {
+		Version  int             `json:"version"`
+		Parent   Identifier      `json:"parent,omitempty"`
+		SyncPath string          `json:"sync_path"`
+		Config   json.RawMessage `json:"config,omitempty"` // accepted legacy field
+		Entries  []ManifestEntry `json:"entries"`
+	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&manifest); err != nil {
+	if err := decoder.Decode(&wire); err != nil {
 		return Manifest{}, fmt.Errorf("%w: decode manifest: %v", ErrInvalidState, err)
 	}
 	if err := decoder.Decode(&struct{}{}); err != io.EOF {
 		return Manifest{}, fmt.Errorf("%w: manifest has trailing JSON values", ErrInvalidState)
 	}
+	manifest := Manifest{Version: wire.Version, Parent: wire.Parent, SyncPath: wire.SyncPath, Entries: wire.Entries}
 	if err := manifest.Validate(); err != nil {
 		return Manifest{}, err
 	}

@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"encoding/json"
@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Changeset is the exact set of HyperSync files added to a Payload for one
+// Changeset is the exact set of hsync files added to a Payload for one
 // publication attempt. Its manifest and index bytes must never be reserialized.
 type Changeset struct {
 	ManifestID    Identifier
@@ -132,6 +132,7 @@ func deploymentInstructions(syncPath string, hasExpected bool) ([]byte, error) {
 	}
 	type instructions struct {
 		Preconditions []precondition `json:"preconditions"`
+		Ignore        []string       `json:"ignore"`
 		Enqueue       []string       `json:"enqueue"`
 	}
 	syncRelative := strings.TrimPrefix(syncPath, "/")
@@ -144,7 +145,7 @@ func deploymentInstructions(syncPath string, hasExpected bool) ([]byte, error) {
 	if hasExpected {
 		condition.Expected = ".deployment/expected.json"
 	}
-	bytes, err := json.Marshal(instructions{Preconditions: []precondition{condition}, Enqueue: []string{manifestPattern, syncRelative}})
+	bytes, err := json.Marshal(instructions{Preconditions: []precondition{condition}, Ignore: []string{".deployment/"}, Enqueue: []string{manifestPattern, syncRelative}})
 	if err != nil {
 		return nil, err
 	}

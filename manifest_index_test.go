@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"errors"

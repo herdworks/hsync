@@ -1,4 +1,4 @@
-package hypersync
+package hsync
 
 import (
 	"context"
@@ -45,6 +45,22 @@ func (reader Remote) ReadManifest(ctx context.Context, id Identifier) ([]byte, e
 	}
 	if _, err := ParseManifest(raw, id); err != nil {
 		return nil, err
+	}
+	return raw, nil
+}
+
+// ReadBlob returns and hash-verifies the exact immutable bytes for id.
+func (reader Remote) ReadBlob(ctx context.Context, id Identifier) ([]byte, error) {
+	if err := id.Validate(); err != nil {
+		return nil, err
+	}
+	syncRoot := path.Dir(reader.SyncPath)
+	raw, err := reader.get(ctx, path.Join(syncRoot, "blobs", id.Filename()))
+	if err != nil {
+		return nil, err
+	}
+	if NewIdentifier(raw) != id {
+		return nil, fmt.Errorf("%w: blob %s has mismatched bytes", ErrInvalidState, id)
 	}
 	return raw, nil
 }
