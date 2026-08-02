@@ -77,7 +77,7 @@ func TestRemoteReadsAndVerifiesBlob(t *testing.T) {
 	}
 }
 
-func TestVerifyContinuation(t *testing.T) {
+func TestReadContinuation(t *testing.T) {
 	t.Parallel()
 	baseRaw, baseID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
@@ -88,10 +88,14 @@ func TestVerifyContinuation(t *testing.T) {
 		t.Fatal(err)
 	}
 	reader := memoryManifestReader{values: map[Identifier][]byte{baseID: baseRaw, liveID: liveRaw}}
-	if err := VerifyContinuation(context.Background(), reader, baseID, liveID); err != nil {
+	continuation, err := ReadContinuation(context.Background(), reader, baseID, liveID)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyContinuation(context.Background(), reader, NewIdentifier([]byte("other")), liveID); !errors.Is(err, ErrManualResolution) {
-		t.Fatalf("VerifyContinuation() error = %v, want manual resolution", err)
+	if len(continuation.Revisions) != 1 || continuation.Revisions[0].Parent != baseID {
+		t.Fatalf("continuation = %#v", continuation)
+	}
+	if _, err := ReadContinuation(context.Background(), reader, NewIdentifier([]byte("other")), liveID); !errors.Is(err, ErrManualResolution) {
+		t.Fatalf("ReadContinuation() error = %v, want manual resolution", err)
 	}
 }

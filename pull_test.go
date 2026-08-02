@@ -97,12 +97,61 @@ func TestPullPlanReportsOnlyDivergentLocalWinsFilesAsSkipped(t *testing.T) {
 		"local.txt":    {Path: "local.txt", Blob: NewIdentifier([]byte("local"))},
 		"remote.txt":   {Path: "remote.txt", Blob: NewIdentifier([]byte("base"))},
 	}}
-	plan := remoteSelections(base, live, workspace)
+	resolved := Manifest{Entries: []ManifestEntry{
+		workspace.Entries["conflict.txt"], workspace.Entries["local.txt"], live.Entries[2],
+	}}
+	plan := remoteSelections(base, live, workspace, resolved)
 	if len(plan.skipped) != 1 || plan.skipped[0] != "conflict.txt" {
 		t.Fatalf("skipped = %#v, want [conflict.txt]", plan.skipped)
 	}
 	if len(plan.materialize) != 1 || plan.materialize[0].path != "remote.txt" {
 		t.Fatalf("materialize = %#v, want remote.txt", plan.materialize)
+	}
+}
+
+func TestPullAdvancesIntermediateWorkspaceValueToLive(t *testing.T) {
+	checkout := t.TempDir()
+	baseBytes, oldBytes, liveBytes := []byte("version: 1\n"), []byte("version: 2\n"), []byte("version: 10\n")
+	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(baseBytes), Size: int64(len(baseBytes)), Mimetype: "application/yaml"}}}
+	baseRaw, baseID, _ := SerializeManifest(base)
+	middle := Manifest{Version: Version, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(oldBytes), Size: int64(len(oldBytes)), Mimetype: "application/yaml"}}}
+	middleRaw, middleID, _ := SerializeManifest(middle)
+	live := Manifest{Version: Version, Parent: middleID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(liveBytes), Size: int64(len(liveBytes)), Mimetype: "application/yaml"}}}
+	liveRaw, liveID, _ := SerializeManifest(live)
+	indexRaw, _ := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, middleID, baseID}})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.sync/latest.json":
+			_, _ = w.Write(indexRaw)
+		case "/.sync/manifests/" + liveID.Filename() + ".json":
+			_, _ = w.Write(liveRaw)
+		case "/.sync/manifests/" + middleID.Filename() + ".json":
+			_, _ = w.Write(middleRaw)
+		case "/.sync/blobs/" + NewIdentifier(liveBytes).Filename():
+			_, _ = w.Write(liveBytes)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	if err := os.MkdirAll(filepath.Join(checkout, ".hsync"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(checkout, ".hsync", "manifest.json"), baseRaw, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeCheckoutFile(checkout, "site.yaml", oldBytes); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := PullWithOptions(context.Background(), checkout, SyncConfig{Remote: server.URL + "/.sync/latest.json"}, PullOptions{Client: server.Client()}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join(checkout, "site.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(liveBytes) {
+		t.Fatalf("site.yaml = %q, want %q", got, liveBytes)
 	}
 }
 

@@ -22,14 +22,15 @@ type PullOptions struct {
 	Output io.Writer
 }
 
-// Pull merges the current clean remote revision into a configured checkout.
-// Remote-only changes are materialized while local changes win conflicts.
+// Pull reconciles a configured checkout with the current clean remote revision.
+// Remote-selected changes are materialized while genuinely divergent local
+// workspace revisions retain local-wins behavior.
 func Pull(ctx context.Context, directory string, config SyncConfig, client *http.Client) (PullResult, error) {
 	return PullWithOptions(ctx, directory, config, PullOptions{Client: client})
 }
 
-// PullWithOptions merges the current clean remote revision into a configured
-// checkout. When Output is non-nil, it receives download progress lines.
+// PullWithOptions reconciles a configured checkout with the current clean
+// remote revision. When Output is non-nil, it receives download progress lines.
 func PullWithOptions(ctx context.Context, directory string, config SyncConfig, options PullOptions) (PullResult, error) {
 	repository, remote, err := OpenCheckout(directory, config, options.Client)
 	if err != nil {
@@ -53,23 +54,21 @@ func PullWithOptions(ctx context.Context, directory string, config SyncConfig, o
 	if index.Published == baseID {
 		return PullResult{IndexURL: remote.BaseURL.String() + remote.SyncPath, ManifestID: baseID, Status: "noop"}, nil
 	}
-	if err := VerifyContinuation(ctx, remote, baseID, index.Published); err != nil {
-		return PullResult{}, err
-	}
-	liveRaw, err := remote.ReadManifest(ctx, index.Published)
+	continuation, err := ReadContinuation(ctx, remote, baseID, index.Published)
 	if err != nil {
 		return PullResult{}, err
 	}
-	live, err := ParseManifest(liveRaw, index.Published)
-	if err != nil {
-		return PullResult{}, err
-	}
+	liveRaw, live := continuation.LiveRaw, continuation.Revisions[0]
 	repository.Config = &config
 	workspace, err := repository.snapshot(&base)
 	if err != nil {
 		return PullResult{}, err
 	}
-	plan := remoteSelections(base, live, workspace)
+	changeset, err := repository.Reconcile(base, index.Published, continuation, workspace)
+	if err != nil {
+		return PullResult{}, err
+	}
+	plan := remoteSelections(base, live, workspace, changeset.manifest)
 	downloads := make([]ManifestEntry, 0, len(plan.materialize))
 	for _, selection := range plan.materialize {
 		if selection.liveOK {
@@ -108,7 +107,7 @@ type pullPlan struct {
 	skipped     []string
 }
 
-func remoteSelections(base, live Manifest, workspace Snapshot) pullPlan {
+func remoteSelections(base, live Manifest, workspace Snapshot, resolved Manifest) pullPlan {
 	baseEntries, liveEntries := entriesByPath(base.Entries), entriesByPath(live.Entries)
 	paths := map[string]struct{}{}
 	for name := range baseEntries {
@@ -130,18 +129,16 @@ func remoteSelections(base, live Manifest, workspace Snapshot) pullPlan {
 		baseEntry, baseOK := baseEntries[name]
 		workspaceEntry, workspaceOK := workspace.Entries[name]
 		liveEntry, liveOK := liveEntries[name]
+		resolvedEntry, resolvedOK := entriesByPath(resolved.Entries)[name]
 		workspaceChanged := !entriesEqual(workspaceEntry, workspaceOK, baseEntry, baseOK)
 		liveChanged := !entriesEqual(liveEntry, liveOK, baseEntry, baseOK)
-		if workspaceChanged {
-			if liveChanged && !entriesEqual(workspaceEntry, workspaceOK, liveEntry, liveOK) {
+		if entriesEqual(resolvedEntry, resolvedOK, workspaceEntry, workspaceOK) {
+			if workspaceChanged && liveChanged && !entriesEqual(workspaceEntry, workspaceOK, liveEntry, liveOK) {
 				plan.skipped = append(plan.skipped, name)
 			}
 			continue
 		}
-		if entriesEqual(workspaceEntry, workspaceOK, liveEntry, liveOK) {
-			continue
-		}
-		plan.materialize = append(plan.materialize, remoteSelection{path: name, live: liveEntry, liveOK: liveOK})
+		plan.materialize = append(plan.materialize, remoteSelection{path: name, live: resolvedEntry, liveOK: resolvedOK})
 	}
 	return plan
 }

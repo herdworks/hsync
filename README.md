@@ -9,6 +9,27 @@ hsync-enabled HyperProviders deployment: it prepares sync state, performs
 conditional writes, uploads immutable blobs and manifests, and publishes the
 mutable synchronization index last.
 
+## Reconciliation algorithm
+
+HSync uses a **lineage-based three-way divergence algorithm** for repository
+reconciliation. An HSync repository is a directory containing a set of managed
+file paths. Repository state is captured in immutable manifests, which are
+snapshots of managed paths and their revisions. A lineage consists of at least
+two distinct but related manifests. A generation is one parent-to-child
+manifest link. An N-generation lineage has N+1 manifests. A lineage containing
+only a parent and child manifest is a direct parent-child lineage. The lineage
+for an individual file path is derived from the repository's lineage.
+
+When a repository’s base and live manifests are the same immutable revision, it
+is fully reconciled. Subsequent local-workspace edits are relative to that
+shared base and are eligible to be published in the next sync event.
+Reconciliation is a repository-level operation performed when local (base) and
+remote (live) manifests differ. For each managed file path, the algorithm
+compares its local workspace revision with the verified lineage from base to
+live. When a local workspace revision matches any revision on that lineage, the
+algorithm selects the live revision for that path. Genuinely divergent local
+workspace revisions are always retained (i.e. local-wins).
+
 ## Storage model
 
 Each site has a stable absolute `sync_path` for its mutable index and an
@@ -59,7 +80,10 @@ never creates a configuration file. A usable repository must contain a root
 configuration file with `sync.remote`; normally that file is one of the
 downloaded source files. `status` reports local changes from that checkout's current base, and
 `pull` incorporates a newer published revision without replacing conflicting
-local work. Use `push` with a generic provider configuration to publish a
+local work. When a local value exactly matches a revision on the verified
+lineage from its local base to the live revision, pull advances that path to
+the current live value; otherwise conflicting local work wins. Use `push` with
+a generic provider configuration to publish a
 checkout. The configuration can be any YAML or JSON document with top-level
 `providers`, `environments`, and `sync` keys; hsync ignores unrelated keys and
 has no default scanner policy. Existing manifest entries form the initial

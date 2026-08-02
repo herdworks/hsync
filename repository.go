@@ -181,21 +181,34 @@ func (repository Repository) manifestTarget(write bool) (string, error) {
 	return safeReadTarget(repository.Root, LocalManifestPath)
 }
 
-// Reconcile merges this repository's local workspace against its immutable
-// base and the authoritative live manifest. The returned changeset is always a
-// child of live and has not yet been given deployment-index bytes.
-func (repository Repository) Reconcile(base, live Manifest, liveID Identifier, workspace Snapshot) (Changeset, error) {
+// Reconcile applies the lineage-based three-way divergence algorithm to each
+// managed path during repository reconciliation from an immutable base to a
+// verified remote live revision. Both deployment preparation and pull use this
+// single file-selection implementation.
+func (repository Repository) Reconcile(base Manifest, liveID Identifier, continuation Continuation, workspace Snapshot) (Changeset, error) {
 	if err := base.Validate(); err != nil {
-		return Changeset{}, err
-	}
-	if err := live.Validate(); err != nil {
 		return Changeset{}, err
 	}
 	if err := liveID.Validate(); err != nil {
 		return Changeset{}, err
 	}
+	if len(continuation.Revisions) == 0 {
+		return Changeset{}, fmt.Errorf("%w: reconciliation continuation is required", ErrInvalidState)
+	}
+	live := continuation.Revisions[0]
+	if err := live.Validate(); err != nil {
+		return Changeset{}, err
+	}
 	if base.SyncPath != live.SyncPath {
 		return Changeset{}, fmt.Errorf("%w: base and live sync_path differ", ErrManualResolution)
+	}
+	for _, revision := range continuation.Revisions[1:] {
+		if err := revision.Validate(); err != nil {
+			return Changeset{}, err
+		}
+		if revision.SyncPath != live.SyncPath {
+			return Changeset{}, fmt.Errorf("%w: continuation sync_path differs", ErrManualResolution)
+		}
 	}
 
 	baseEntries := entriesByPath(base.Entries)
@@ -210,13 +223,18 @@ func (repository Repository) Reconcile(base, live Manifest, liveID Identifier, w
 	for name := range workspace.Entries {
 		paths[name] = struct{}{}
 	}
+	for _, revision := range continuation.Revisions {
+		for name := range entriesByPath(revision.Entries) {
+			paths[name] = struct{}{}
+		}
+	}
 
 	entries := make([]ManifestEntry, 0, len(paths))
 	for name := range paths {
 		baseEntry, baseOK := baseEntries[name]
 		workspaceEntry, workspaceOK := workspace.Entries[name]
 		liveEntry, liveOK := liveEntries[name]
-		selected, ok := mergeEntry(baseEntry, baseOK, workspaceEntry, workspaceOK, liveEntry, liveOK)
+		selected, ok := mergeEntry(name, baseEntry, baseOK, workspaceEntry, workspaceOK, liveEntry, liveOK, continuation.Revisions)
 		if ok {
 			entries = append(entries, selected)
 		}
@@ -319,11 +337,20 @@ func changesetMatchesLive(changeset Changeset, live Manifest) bool {
 		reflect.DeepEqual(changeset.manifest.Entries, live.Entries)
 }
 
-func mergeEntry(base ManifestEntry, baseOK bool, workspace ManifestEntry, workspaceOK bool, live ManifestEntry, liveOK bool) (ManifestEntry, bool) {
+func mergeEntry(name string, base ManifestEntry, baseOK bool, workspace ManifestEntry, workspaceOK bool, live ManifestEntry, liveOK bool, history []Manifest) (ManifestEntry, bool) {
 	if entriesEqual(workspace, workspaceOK, base, baseOK) {
 		return live, liveOK
 	}
-	if entriesEqual(live, liveOK, base, baseOK) || entriesEqual(workspace, workspaceOK, live, liveOK) {
+	if entriesEqual(workspace, workspaceOK, live, liveOK) {
+		return workspace, workspaceOK
+	}
+	for _, revision := range history {
+		entry, ok := entriesByPath(revision.Entries)[name]
+		if entriesEqual(workspace, workspaceOK, entry, ok) {
+			return live, liveOK
+		}
+	}
+	if entriesEqual(live, liveOK, base, baseOK) {
 		return workspace, workspaceOK
 	}
 	return workspace, workspaceOK

@@ -8,9 +8,11 @@ import (
 	"time"
 )
 
-// Sync is one hsync unit of work. Prepare reads and reconciles state then
-// applies a non-empty changeset to Payload. Finalize advances Repository only
-// after its caller has deployed that payload successfully.
+// Sync is one hsync unit of work. Prepare reads repository state and, when the
+// local base and remote live manifests differ, performs repository
+// reconciliation before applying a non-empty changeset to Payload. Finalize
+// advances Repository only after its caller has deployed that payload
+// successfully.
 type Sync struct {
 	Repository Repository
 	Payload    Payload
@@ -38,8 +40,9 @@ const (
 	StatusFinalized Status = "finalized"
 )
 
-// Prepare reconciles Repository with authoritative remote state, then writes a
-// non-empty changeset beneath Payload. It performs no provider writes.
+// Prepare reconciles Repository with authoritative remote state when required,
+// then writes a non-empty changeset beneath Payload. It performs no provider
+// writes.
 //
 // Repository.Config controls optional discovery; without it, synchronization
 // uses only the files already tracked by the local manifest.
@@ -90,20 +93,12 @@ func (sync *Sync) Prepare(ctx context.Context) error {
 	if err := index.PendingError(now); err != nil {
 		return err
 	}
-	liveRaw, err := sync.Remote.ReadManifest(ctx, index.Published)
+	continuation, err := ReadContinuation(ctx, sync.Remote, baseID, index.Published)
 	if err != nil {
-		return fmt.Errorf("read published manifest: %w", err)
+		return fmt.Errorf("read published continuation: %w", err)
 	}
-	live, err := ParseManifest(liveRaw, index.Published)
-	if err != nil {
-		return err
-	}
-	if baseID != index.Published {
-		if err := VerifyContinuation(ctx, sync.Remote, baseID, index.Published); err != nil {
-			return err
-		}
-	}
-	changeset, err := sync.Repository.Reconcile(base, live, index.Published, local)
+	liveRaw, live := continuation.LiveRaw, continuation.Revisions[0]
+	changeset, err := sync.Repository.Reconcile(base, index.Published, continuation, local)
 	if err != nil {
 		return err
 	}

@@ -122,7 +122,7 @@ func TestReconcileLocalWinsConflict(t *testing.T) {
 	workspace := Snapshot{Entries: map[string]ManifestEntry{"content/post.md": {Path: "content/post.md", Blob: localBlob, Size: 5, Mimetype: "text/markdown; charset=utf-8"}}, Blobs: map[Identifier][]byte{localBlob: []byte("local")}}
 
 	liveID := NewIdentifier([]byte("live manifest"))
-	changeset, err := (Repository{}).Reconcile(base, live, liveID, workspace)
+	changeset, err := (Repository{}).Reconcile(base, liveID, Continuation{Revisions: []Manifest{live}}, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -151,11 +151,49 @@ func TestReconcileOmitsBlobsAlreadyReferencedByLiveManifest(t *testing.T) {
 		"content/b.md": {Path: "content/b.md", Blob: sharedBlob, Size: 6, Mimetype: "text/markdown; charset=utf-8"},
 	}, Blobs: map[Identifier][]byte{sharedBlob: []byte("shared")}}
 
-	changeset, err := (Repository{}).Reconcile(base, live, NewIdentifier([]byte("live manifest")), workspace)
+	changeset, err := (Repository{}).Reconcile(base, NewIdentifier([]byte("live manifest")), Continuation{Revisions: []Manifest{live}}, workspace)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(changeset.Blobs) != 0 {
 		t.Fatalf("required blobs = %#v, want none", changeset.Blobs)
+	}
+}
+
+func TestReconcileAdoptsWorkspaceValueFoundInRemoteHistory(t *testing.T) {
+	t.Parallel()
+	baseBlob := NewIdentifier([]byte("version: 1\n"))
+	intermediateBlob := NewIdentifier([]byte("version: 2\n"))
+	liveBlob := NewIdentifier([]byte("version: 10\n"))
+	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "site.yaml", Blob: baseBlob, Size: 11, Mimetype: "application/yaml"}}}
+	intermediate := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: intermediateBlob, Size: 11, Mimetype: "application/yaml"}}}
+	live := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: liveBlob, Size: 12, Mimetype: "application/yaml"}}}
+	workspace := Snapshot{Entries: map[string]ManifestEntry{"site.yaml": {Path: "site.yaml", Blob: intermediateBlob, Size: 11, Mimetype: "application/yaml"}}, Blobs: map[Identifier][]byte{intermediateBlob: []byte("version: 2\n")}}
+
+	changeset, err := (Repository{}).Reconcile(base, NewIdentifier([]byte("live manifest")), Continuation{Revisions: []Manifest{live, intermediate}}, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changeset.manifest.Entries[0].Blob; got != liveBlob {
+		t.Fatalf("blob = %s, want live %s", got, liveBlob)
+	}
+	if len(changeset.Blobs) != 0 {
+		t.Fatalf("blobs = %#v, want none", changeset.Blobs)
+	}
+}
+
+func TestReconcileAdoptsIntermediateDeletion(t *testing.T) {
+	t.Parallel()
+	baseBlob, liveBlob := NewIdentifier([]byte("base")), NewIdentifier([]byte("live"))
+	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "page.txt", Blob: baseBlob, Size: 4, Mimetype: "text/plain"}}}
+	middle := Manifest{Version: Version, SyncPath: base.SyncPath}
+	live := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "page.txt", Blob: liveBlob, Size: 4, Mimetype: "text/plain"}}}
+	workspace := Snapshot{Entries: map[string]ManifestEntry{}, Blobs: map[Identifier][]byte{}}
+	changeset, err := (Repository{}).Reconcile(base, NewIdentifier([]byte("live manifest")), Continuation{Revisions: []Manifest{live, middle}}, workspace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := changeset.manifest.Entries[0].Blob; got != liveBlob {
+		t.Fatalf("blob = %s, want live %s", got, liveBlob)
 	}
 }

@@ -101,34 +101,58 @@ func (reader Remote) get(ctx context.Context, requestPath string) ([]byte, error
 	return io.ReadAll(response.Body)
 }
 
-// VerifyContinuation proves that localID is an immutable ancestor of the
-// live published manifest. Merely carrying a plausible parent field is not
-// enough: every retrieved revision is verified against its Identifier.
-func VerifyContinuation(ctx context.Context, reader ManifestReader, localID, liveID Identifier) error {
+// Continuation holds the verified remote manifests needed for repository
+// reconciliation from the local base to the live revision. Revisions begins
+// with live and ends with the direct child of base when they differ.
+type Continuation struct {
+	LiveRaw   []byte
+	Revisions []Manifest
+}
+
+// ReadContinuation proves that localID is an immutable ancestor of liveID and
+// retains every newer verified revision from base to live for the lineage-based
+// three-way divergence algorithm used during repository reconciliation.
+func ReadContinuation(ctx context.Context, reader ManifestReader, localID, liveID Identifier) (Continuation, error) {
 	if err := localID.Validate(); err != nil {
-		return err
+		return Continuation{}, err
 	}
 	if err := liveID.Validate(); err != nil {
-		return err
+		return Continuation{}, err
 	}
+	if localID == liveID {
+		raw, err := reader.ReadManifest(ctx, liveID)
+		if err != nil {
+			return Continuation{}, err
+		}
+		manifest, err := ParseManifest(raw, liveID)
+		if err != nil {
+			return Continuation{}, err
+		}
+		return Continuation{LiveRaw: raw, Revisions: []Manifest{manifest}}, nil
+	}
+	continuation := Continuation{}
 	visited := map[Identifier]struct{}{}
 	for current := liveID; current != ""; {
 		if current == localID {
-			return nil
+			return continuation, nil
 		}
 		if _, seen := visited[current]; seen {
-			return fmt.Errorf("%w: manifest ancestry loop at %s", ErrInvalidState, current)
+			return Continuation{}, fmt.Errorf("%w: manifest ancestry loop at %s", ErrInvalidState, current)
 		}
 		visited[current] = struct{}{}
 		raw, err := reader.ReadManifest(ctx, current)
 		if err != nil {
-			return err
+			return Continuation{}, err
 		}
 		manifest, err := ParseManifest(raw, current)
 		if err != nil {
-			return err
+			return Continuation{}, err
 		}
+		if len(continuation.Revisions) == 0 {
+			continuation.LiveRaw = raw
+		}
+		continuation.Revisions = append(continuation.Revisions, manifest)
 		current = manifest.Parent
 	}
-	return fmt.Errorf("%w: local manifest %s is not reachable from live %s", ErrManualResolution, localID, liveID)
+	return Continuation{}, fmt.Errorf("%w: local manifest %s is not reachable from live %s", ErrManualResolution, localID, liveID)
 }

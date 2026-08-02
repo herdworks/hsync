@@ -76,14 +76,10 @@ github.com/herdworks/cli-go v0.1.0 h1:UTYthxCxy+jj3yug8ODQrBFb+NikDPbatuY+h+1jM1
 github.com/herdworks/cli-go v0.1.0/go.mod h1:tXRMMf5l3ZyuS2EPnQkmqDQLorlK6mxEHSOLogFkIcc=
 github.com/herdworks/hyperfiles-go v0.1.0 h1:ooyw2X9Zf07j1+DNpbii7wtONl1XPE2b0vdn9iiDTME=
 github.com/herdworks/hyperfiles-go v0.1.0/go.mod h1:LIkN6Ro8w6LKx2oNUAj25+dOpn+AW3q3SXV/DrvUDqM=
-github.com/herdworks/hypergraph-go v0.22.3 h1:MjwDyOSOcEZMxK6Ra0dy2vI+ZkJ5Z7kvGmtyHyy+d0A=
-github.com/herdworks/hypergraph-go v0.22.3/go.mod h1:yIgqNsfnxxoON3XqAAg+u3SG7SKBOu+7iNerZby5KhI=
-github.com/herdworks/hypergraph-go v0.23.0 h1:MC+nvqLCbVU4v6oed7lWFBo8CB6YJka/oVwbcmAXg0M=
-github.com/herdworks/hypergraph-go v0.23.0/go.mod h1:yIgqNsfnxxoON3XqAAg+u3SG7SKBOu+7iNerZby5KhI=
 github.com/herdworks/hypergraph-go v0.23.1 h1:mT5PZDujeK8BGXXy8XYBIusWVXMT9fdp2+9abqkF4tQ=
 github.com/herdworks/hypergraph-go v0.23.1/go.mod h1:yIgqNsfnxxoON3XqAAg+u3SG7SKBOu+7iNerZby5KhI=
-github.com/herdworks/hyperproviders-go v0.24.0 h1:4Wgcum1OIseWj+Uw5rkBjso5APBk5Jm23C3FIJDlG54=
-github.com/herdworks/hyperproviders-go v0.24.0/go.mod h1:zjX9TK/3snrX9Ndlhf/4AW3m5R/rPM4h0jmJgjLZLb8=
+github.com/herdworks/hyperproviders-go v0.25.0 h1:BpGZHz2XpynMHuYlqgWWBQjr3RByi+l47e7OByktQw4=
+github.com/herdworks/hyperproviders-go v0.25.0/go.mod h1:zjX9TK/3snrX9Ndlhf/4AW3m5R/rPM4h0jmJgjLZLb8=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 h1:BQSFePA1RWJOlocH6Fxy8MmwDt+yVQYULKfN0RoTN8A=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99/go.mod h1:1lJo3i6rXxKeerYnT8Nvf0QmHCRC1n8sfWVwXF2Frvo=
 github.com/kevinburke/ssh_config v1.2.0 h1:x584FjTGwHzMwvHx18PXxbBVzfnxogHaAReU4gf13a4=
