@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * **Changed:** Local bases are stored at `.hsync/manifest.json`, while external
   configuration defines synchronization policy. Root endpoints default to
   `/.hsync/index.json`; custom index paths remain supported.
+* **Changed:** Hsync-enabled deployments use HyperProviders' shared payload
+  validation, keeping the project configuration directory and top-level Git
+  metadata out of provider deployment plans.
 * **Removed:** The `hypersync` executable and manifest-embedded scanner
   configuration.
 * **Security:** Reject unsafe configuration, workspace, and checkout paths;

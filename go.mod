@@ -6,7 +6,7 @@ require (
 	github.com/herdworks/cli-go v0.1.0
 	github.com/herdworks/hyperfiles-go v0.1.0
 	github.com/herdworks/hypergraph-go v0.23.1
-	github.com/herdworks/hyperproviders-go v0.25.0
+	github.com/herdworks/hyperproviders-go v0.25.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 

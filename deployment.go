@@ -2,12 +2,10 @@ package hsync
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"path/filepath"
 	"time"
 
 	hyperproviders "github.com/herdworks/hyperproviders-go"
@@ -138,16 +136,13 @@ func SyncFromConfig(ctx context.Context, configPath string, configBytes []byte, 
 	if config.Sync == nil {
 		return nil, nil
 	}
-	if payloadPath == "" {
-		return nil, errors.New("deployment payload path is required")
-	}
 	if err := config.Sync.Validate(); err != nil {
 		return nil, err
 	}
-	root := config.Directory()
-	if samePath(root, payloadPath) {
-		return nil, fmt.Errorf("synchronization deployment payload must not be the repository root")
+	if err := hyperproviders.ValidateDeploymentPayloadPath(configPath, payloadPath); err != nil {
+		return nil, err
 	}
+	root := config.Directory()
 	remoteURL, err := config.Sync.RemoteURL()
 	if err != nil {
 		return nil, err
@@ -155,13 +150,4 @@ func SyncFromConfig(ctx context.Context, configPath string, configBytes []byte, 
 	remote := Remote{BaseURL: &url.URL{Scheme: remoteURL.Scheme, Host: remoteURL.Host}, Client: client, SyncPath: remoteURL.Path}
 	repository := Repository{Root: root, Config: config.Sync}
 	return &Sync{Repository: repository, Payload: Payload{Root: payloadPath}, Remote: remote, Now: func() time.Time { return now }}, nil
-}
-
-func samePath(left, right string) bool {
-	left, err := filepath.Abs(filepath.Clean(left))
-	if err != nil {
-		return false
-	}
-	right, err = filepath.Abs(filepath.Clean(right))
-	return err == nil && left == right
 }
