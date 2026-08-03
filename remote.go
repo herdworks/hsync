@@ -24,6 +24,14 @@ type ManifestReader interface {
 	ReadManifest(context.Context, Identifier) ([]byte, error)
 }
 
+// Continuation holds the verified remote manifests needed for repository
+// reconciliation from the local base to the live revision. Revisions begins
+// with live and ends with the direct child of base when they differ.
+type Continuation struct {
+	LiveRaw   []byte
+	Revisions []Manifest
+}
+
 // ErrNotFound reports an absent live state object.
 var ErrNotFound = errors.New("synchronization object not found")
 
@@ -99,14 +107,6 @@ func (reader Remote) get(ctx context.Context, requestPath string) ([]byte, error
 		return nil, fmt.Errorf("read %s: HTTP %s", requestPath, response.Status)
 	}
 	return io.ReadAll(response.Body)
-}
-
-// Continuation holds the verified remote manifests needed for repository
-// reconciliation from the local base to the live revision. Revisions begins
-// with live and ends with the direct child of base when they differ.
-type Continuation struct {
-	LiveRaw   []byte
-	Revisions []Manifest
 }
 
 // ReadContinuation proves that localID is an immutable ancestor of liveID and

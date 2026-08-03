@@ -65,7 +65,7 @@ func TestRepositorySnapshotWithEmptyIncludeSelectsNothing(t *testing.T) {
 	writeFile(t, filepath.Join(workspace, ".secrets"), "do not upload")
 	writeFile(t, filepath.Join(workspace, "content", "page.html"), "<p>page</p>")
 
-	config, err := ParseConfigDocument("hsync.yaml", []byte(`sync:
+	config, err := ParseConfig([]byte(`sync:
   remote: https://example.com/.sync/index.json
   include: {}
   ignore: {}
@@ -76,12 +76,33 @@ func TestRepositorySnapshotWithEmptyIncludeSelectsNothing(t *testing.T) {
 	if config.Sync == nil {
 		t.Fatal("parsed sync config is nil")
 	}
-	snapshot, err := (Repository{Root: workspace, Config: config.Sync}).snapshot(nil)
+	if _, err := (Repository{Root: workspace, Config: config.Sync}).snapshot(nil); err == nil {
+		t.Fatal("snapshot(nil) error = nil for empty sync.include")
+	}
+}
+
+func TestRepositorySnapshotHonorsRootGitignore(t *testing.T) {
+	workspace := t.TempDir()
+	writeFile(t, filepath.Join(workspace, ".gitignore"), "secret\ncache/\n!cache/keep.txt\n")
+	writeFile(t, filepath.Join(workspace, "content", "secret"), "secret")
+	writeFile(t, filepath.Join(workspace, "cache", "drop.txt"), "drop")
+	writeFile(t, filepath.Join(workspace, "cache", "keep.txt"), "keep")
+	writeFile(t, filepath.Join(workspace, "content", "page.txt"), "page")
+
+	snapshot, err := (Repository{Root: workspace, Config: &SyncConfig{Include: Rules{Paths: []string{"content/**", "cache/**"}}}}).snapshot(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Entries) != 0 {
-		t.Fatalf("entries = %#v, want no files for empty sync.include", snapshot.Entries)
+	if _, ok := snapshot.Entries["content/secret"]; ok {
+		t.Fatal("gitignored secret was included")
+	}
+	if _, ok := snapshot.Entries["cache/drop.txt"]; ok {
+		t.Fatal("gitignored cache file was included")
+	}
+	for _, path := range []string{"cache/keep.txt", "content/page.txt"} {
+		if _, ok := snapshot.Entries[path]; !ok {
+			t.Fatalf("%q not included: %#v", path, snapshot.Entries)
+		}
 	}
 }
 

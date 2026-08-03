@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -52,7 +51,11 @@ func (deployment *Deployment) Prepare(ctx context.Context, writer io.Writer) err
 			return err
 		}
 	}
-	provider := &hyperproviders.Deployment{ConfigPath: deployment.ConfigPath, ConfigBytes: configBytes, PayloadPath: deployment.PayloadPath, Providers: deployment.Providers, Environment: deployment.Environment, Kind: deployment.Kind}
+	environment := deployment.Environment
+	if environment == "" && len(deployment.Providers) == 0 {
+		environment = DefaultEnvironment
+	}
+	provider := &hyperproviders.Deployment{ConfigPath: deployment.ConfigPath, ConfigBytes: configBytes, PayloadPath: deployment.PayloadPath, Providers: deployment.Providers, Environment: environment, Kind: deployment.Kind}
 	if err := provider.Prepare(ctx, writer); err != nil {
 		return err
 	}
@@ -83,97 +86,6 @@ func (deployment *Deployment) Execute(ctx context.Context, secrets hyperprovider
 	return nil
 }
 
-func (deployment *Deployment) configSnapshot() ([]byte, error) {
-	if deployment.ConfigBytes != nil {
-		if err := hyperproviders.ValidateDeploymentConfigPath(deployment.ConfigPath); err != nil {
-			return nil, err
-		}
-		return append([]byte(nil), deployment.ConfigBytes...), nil
-	}
-	return hyperproviders.ReadDeploymentConfig(deployment.ConfigPath)
-}
-
-func (deployment *Deployment) now() time.Time {
-	if deployment.Now != nil {
-		return deployment.Now().UTC()
-	}
-	return time.Now().UTC()
-}
-
-// SyncFromConfig constructs a synchronization unit from a repository-root
-// configuration snapshot. It returns nil when the configuration omits sync.
-func SyncFromConfig(ctx context.Context, configPath string, configBytes []byte, payloadPath string, client *http.Client, now time.Time) (*Sync, error) {
-	config, err := ParseConfigDocument(configPath, configBytes)
-	if err != nil {
-		return nil, err
-	}
-	if config.Sync == nil {
-		return nil, nil
-	}
-	if payloadPath == "" {
-		return nil, errors.New("deployment payload path is required")
-	}
-	if err := config.Sync.Validate(); err != nil {
-		return nil, err
-	}
-	root := filepath.Dir(configPath)
-	remoteURL, err := config.Sync.RemoteURL()
-	if err != nil {
-		return nil, err
-	}
-	remote := Remote{BaseURL: &url.URL{Scheme: remoteURL.Scheme, Host: remoteURL.Host}, Client: client, SyncPath: remoteURL.Path}
-	if err := ensureLocalBase(ctx, root, remote, now); err != nil {
-		return nil, err
-	}
-	repository := Repository{Root: root, Config: config.Sync}
-	return &Sync{Repository: repository, Payload: Payload{Root: payloadPath}, Remote: remote, Now: func() time.Time { return now }}, nil
-}
-
-func ensureLocalBase(ctx context.Context, root string, remote Remote, now time.Time) error {
-	repository := Repository{Root: root}
-	_, err := repository.manifestTarget(false)
-	if err == nil {
-		_, _, manifest, err := repository.LoadManifest()
-		if err != nil {
-			return fmt.Errorf("load sync manifest: %w", err)
-		}
-		if manifest.SyncPath != remote.SyncPath {
-			return fmt.Errorf("sync manifest sync_path %q differs from configured index path %q", manifest.SyncPath, remote.SyncPath)
-		}
-		return nil
-	}
-	if !errors.Is(err, os.ErrNotExist) {
-		return fmt.Errorf("inspect sync manifest: %w", err)
-	}
-	indexRaw, err := remote.ReadIndex(ctx)
-	if errors.Is(err, ErrNotFound) {
-		_, _, err := repository.Initialize(remote.SyncPath)
-		return err
-	}
-	if err != nil {
-		return fmt.Errorf("read configured synchronization index: %w", err)
-	}
-	index, err := ParseIndex(indexRaw)
-	if err != nil {
-		return err
-	}
-	if err := index.PendingError(now); err != nil {
-		return err
-	}
-	manifestRaw, err := remote.ReadManifest(ctx, index.Published)
-	if err != nil {
-		return err
-	}
-	manifest, err := ParseManifest(manifestRaw, index.Published)
-	if err != nil {
-		return err
-	}
-	if manifest.SyncPath != remote.SyncPath {
-		return fmt.Errorf("published manifest sync_path %q differs from configured index path %q", manifest.SyncPath, remote.SyncPath)
-	}
-	return repository.Finalize(Changeset{ManifestID: index.Published, Manifest: manifestRaw}, indexRaw, now)
-}
-
 // Instructions returns a snapshot of the nested provider declarations.
 func (deployment *Deployment) Instructions() hyperproviders.DeploymentInstructions {
 	if deployment == nil || deployment.provider == nil {
@@ -196,4 +108,60 @@ func (deployment *Deployment) Status() hyperproviders.DeploymentStatus {
 		return hyperproviders.DeploymentPending
 	}
 	return deployment.provider.Status()
+}
+
+func (deployment *Deployment) configSnapshot() ([]byte, error) {
+	if deployment.ConfigBytes != nil {
+		if err := hyperproviders.ValidateDeploymentConfigPath(deployment.ConfigPath); err != nil {
+			return nil, err
+		}
+		return append([]byte(nil), deployment.ConfigBytes...), nil
+	}
+	return hyperproviders.ReadDeploymentConfig(deployment.ConfigPath)
+}
+
+func (deployment *Deployment) now() time.Time {
+	if deployment.Now != nil {
+		return deployment.Now().UTC()
+	}
+	return time.Now().UTC()
+}
+
+// SyncFromConfig constructs a synchronization unit from a repository-root
+// configuration snapshot. It returns nil when the configuration omits sync.
+func SyncFromConfig(ctx context.Context, configPath string, configBytes []byte, payloadPath string, client *http.Client, now time.Time) (*Sync, error) {
+	config, err := ParseConfig(configBytes)
+	if err != nil {
+		return nil, err
+	}
+	config.Path = configPath
+	if config.Sync == nil {
+		return nil, nil
+	}
+	if payloadPath == "" {
+		return nil, errors.New("deployment payload path is required")
+	}
+	if err := config.Sync.Validate(); err != nil {
+		return nil, err
+	}
+	root := config.Directory()
+	if samePath(root, payloadPath) {
+		return nil, fmt.Errorf("synchronization deployment payload must not be the repository root")
+	}
+	remoteURL, err := config.Sync.RemoteURL()
+	if err != nil {
+		return nil, err
+	}
+	remote := Remote{BaseURL: &url.URL{Scheme: remoteURL.Scheme, Host: remoteURL.Host}, Client: client, SyncPath: remoteURL.Path}
+	repository := Repository{Root: root, Config: config.Sync}
+	return &Sync{Repository: repository, Payload: Payload{Root: payloadPath}, Remote: remote, Now: func() time.Time { return now }}, nil
+}
+
+func samePath(left, right string) bool {
+	left, err := filepath.Abs(filepath.Clean(left))
+	if err != nil {
+		return false
+	}
+	right, err = filepath.Abs(filepath.Clean(right))
+	return err == nil && left == right
 }

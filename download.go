@@ -38,6 +38,13 @@ type blobDownload struct {
 
 const downloadWorkers = 8
 
+func (download *blobDownload) read(ctx context.Context, remote Remote, id Identifier) ([]byte, error) {
+	download.once.Do(func() {
+		download.contents, download.err = remote.ReadBlob(ctx, id)
+	})
+	return download.contents, download.err
+}
+
 // OpenRepository loads a local checkout. Its configuration is a repository
 // file and is resolved separately by the caller.
 func OpenRepository(directory string) (Repository, error) {
@@ -194,13 +201,6 @@ func downloadEntries(ctx context.Context, root string, remote Remote, entries []
 		})
 	}
 	return group.Wait()
-}
-
-func (download *blobDownload) read(ctx context.Context, remote Remote, id Identifier) ([]byte, error) {
-	download.once.Do(func() {
-		download.contents, download.err = remote.ReadBlob(ctx, id)
-	})
-	return download.contents, download.err
 }
 
 func manifestSize(manifest Manifest) int64 {

@@ -25,7 +25,7 @@ type Repository struct {
 
 const LocalManifestPath = ".hsync/manifest.json"
 
-var reservedPaths = []string{".hsync/**", ".deployment/**"}
+var reservedPaths = []string{".git/**", ".hsync/**", ".deployment/**"}
 
 // Snapshot contains locally discovered managed entries and their exact blob
 // bytes. Callers write these bytes without re-reading or reserializing them.
@@ -33,6 +33,8 @@ type Snapshot struct {
 	Entries map[string]ManifestEntry
 	Blobs   map[Identifier][]byte
 }
+
+type gitignoreRules struct{ expressions PathExpressions }
 
 func (snapshot *Snapshot) add(entry ManifestEntry, contents []byte) {
 	if snapshot.Entries == nil {
@@ -285,13 +287,20 @@ func (repository Repository) snapshot(manifest *Manifest) (Snapshot, error) {
 	if policy, err = config.Policy(reservedPaths...); err != nil {
 		return Snapshot{}, err
 	}
+	if manifest == nil && !policy.includePaths.hasPositive() {
+		return Snapshot{}, fmt.Errorf("%w: initial synchronization requires a positive sync.include path rule", ErrInvalidState)
+	}
+	gitignore, err := repository.gitignore()
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if manifest != nil {
 		tracked, err := repository.entries(manifest.Entries)
 		if err != nil {
 			return Snapshot{}, err
 		}
 		for _, entry := range tracked.Entries {
-			if policy.Allows(entry) {
+			if policy.Allows(entry) && gitignore.Allows(entry.Path) {
 				files.add(entry, tracked.Blobs[entry.Blob])
 			}
 		}
@@ -299,15 +308,39 @@ func (repository Repository) snapshot(manifest *Manifest) (Snapshot, error) {
 	if !policy.ScanningEnabled() {
 		return files, nil // early return
 	}
-	if discovered, err = repository.discover(); err != nil {
+	if discovered, err = walk(repository.Root); err != nil {
 		return Snapshot{}, err
 	}
 	for _, entry := range discovered.Entries {
-		if policy.Includes(entry) && policy.Allows(entry) {
+		if policy.Includes(entry) && policy.Allows(entry) && gitignore.Allows(entry.Path) {
 			files.add(entry, discovered.Blobs[entry.Blob])
 		}
 	}
 	return files, nil
+}
+
+func (rules gitignoreRules) Allows(value string) bool {
+	matched, ignored := rules.expressions.match(value)
+	return !matched || !ignored
+}
+
+func (repository Repository) gitignore() (gitignoreRules, error) {
+	filename, err := safeReadTarget(repository.Root, ".gitignore")
+	if errors.Is(err, os.ErrNotExist) {
+		return gitignoreRules{}, nil
+	}
+	if err != nil {
+		return gitignoreRules{}, err
+	}
+	raw, err := os.ReadFile(filename)
+	if err != nil {
+		return gitignoreRules{}, err
+	}
+	rules, err := parseGitIgnore(string(raw))
+	if err != nil {
+		return gitignoreRules{}, fmt.Errorf("parse .gitignore: %w", err)
+	}
+	return gitignoreRules{expressions: rules}, nil
 }
 
 func (repository Repository) entries(manifestEntries []ManifestEntry) (Snapshot, error) {
@@ -324,11 +357,6 @@ func (repository Repository) entries(manifestEntries []ManifestEntry) (Snapshot,
 		snapshot.add(entry, contents)
 	}
 	return snapshot, nil
-}
-
-// discover walks this repository to collect unfiltered file candidates.
-func (repository Repository) discover() (Snapshot, error) {
-	return walk(repository.Root)
 }
 
 func changesetMatchesLive(changeset Changeset, live Manifest) bool {
@@ -397,9 +425,6 @@ func compareWorkspace(base []ManifestEntry, workspace map[string]ManifestEntry) 
 	}
 	return changes
 }
-
-// IsAlreadyInitialized reports whether err came from an existing local base.
-func IsAlreadyInitialized(err error) bool { return errors.Is(err, os.ErrExist) }
 
 func walk(workspace string) (Snapshot, error) {
 	snapshot := Snapshot{Entries: make(map[string]ManifestEntry), Blobs: make(map[Identifier][]byte)}
@@ -484,16 +509,6 @@ func validateGlob(pattern string) error {
 		}
 	}
 	return nil
-}
-
-func validateIncludeGlob(pattern string) error {
-	if pattern == "" || strings.HasPrefix(pattern, "/") || path.Clean(pattern) != pattern || pattern == "." || strings.HasPrefix(pattern, "../") {
-		return fmt.Errorf("must be a relative path below the repository root")
-	}
-	if pattern == "*" || pattern == "**" {
-		return fmt.Errorf("must name a path below the repository root")
-	}
-	return validateGlob(pattern)
 }
 
 func globMatch(pattern, value string) bool {

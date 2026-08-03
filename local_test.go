@@ -27,7 +27,7 @@ func TestInitializeAndLoadLocalManifest(t *testing.T) {
 		t.Fatalf("local manifest was not written to the standard path: %v", err)
 	}
 	_, _, err = repository.Initialize("/.hsync/revision.json")
-	if !IsAlreadyInitialized(err) {
+	if !errors.Is(err, os.ErrExist) {
 		t.Fatalf("second initialization error = %v, want os.ErrExist", err)
 	}
 }

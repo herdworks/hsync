@@ -109,6 +109,23 @@ func TestPullPlanReportsOnlyDivergentLocalWinsFilesAsSkipped(t *testing.T) {
 	}
 }
 
+func TestPullLogsDeletedFiles(t *testing.T) {
+	checkout := t.TempDir()
+	if err := writeCheckoutFile(checkout, "content/removed.txt", []byte("removed")); err != nil {
+		t.Fatal(err)
+	}
+	var output bytes.Buffer
+	if err := materializeRemoteSelections(context.Background(), checkout, nil, []remoteSelection{{path: "content/removed.txt"}}, Remote{}, &output); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := output.String(), "file content/removed.txt deleted\n"; got != want {
+		t.Fatalf("output = %q, want %q", got, want)
+	}
+	if _, err := os.Stat(filepath.Join(checkout, "content", "removed.txt")); !os.IsNotExist(err) {
+		t.Fatalf("removed file = %v, want absent", err)
+	}
+}
+
 func TestPullAdvancesIntermediateWorkspaceValueToLive(t *testing.T) {
 	checkout := t.TempDir()
 	baseBytes, oldBytes, liveBytes := []byte("version: 1\n"), []byte("version: 2\n"), []byte("version: 10\n")

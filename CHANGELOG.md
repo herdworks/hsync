@@ -7,34 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
-* **Added:** `Deployment`, an hsync-enabled HyperProviders deployment. It reads one shared
-  repository-root configuration snapshot, prepares optional synchronization,
-  delegates provider execution to HyperProviders, and advances the local
-  synchronization base only after a successful deployment.
-* **Added:** The `hsync` checkout workflow: `download`, `status`, `pull`, `reset`,
-  and generic provider-backed `push`. Downloads verify immutable manifests and
-  blobs before publishing a checkout; pull performs a local-wins three-way
-  merge; reset restores only tracked files and never deletes untracked files.
-* **Added:** `SyncConfig` for repository-root `sync` policy, including configurable
-  remote index URLs, explicit include/ignore rules, and file-size limits.
-  Configuration discovery supports `--config`, `HSYNC_CONFIG`, and the
-  conventional YAML or JSON filenames.
-* **Changed:** Renamed HyperSync to **hsync**. The module path is now
+* **Added:** `Deployment`, an hsync-enabled HyperProviders deployment that
+  prepares synchronization, delegates publication, and advances the local base
+  only after a successful deployment.
+* **Added:** A checkout workflow through `hsync download`, `status`, `pull`,
+  `reset`, and provider-backed `push`. Downloads verify immutable content;
+  pull retains divergent local work; and reset restores only tracked files.
+* **Added:** Repository-root `SyncConfig` policy for remote discovery, file
+  selection, and size limits, with YAML/JSON configuration discovery.
+* **Changed:** Renamed HyperSync to **hsync**: the module path is now
   `github.com/herdworks/hsync`, the executable is `hsync`, and website
   discovery uses `rel="https://hsync.sh"`.
-* **Changed:** Local bases now always live at `.hsync/manifest.json`; synchronization
-  policy is no longer embedded in immutable manifests. Existing manifest
-  entries remain managed, `sync.include` opts additional files into scanning,
-  and `sync.ignore` filters the complete managed set.
-* **Changed:** Root remotes use `/.hsync/index.json` by default, while custom index paths
-  remain supported. A downloaded checkout must include its own repository-root
-  configuration file with `sync.remote`.
+* **Changed:** Local bases are stored at `.hsync/manifest.json`, while external
+  configuration defines synchronization policy. Root endpoints default to
+  `/.hsync/index.json`; custom index paths remain supported.
 * **Removed:** The `hypersync` executable and manifest-embedded scanner
   configuration.
-* **Security:** Reject symlinks for configuration, workspace reads, and local writes; never
-  add symlinks to manifests or follow them while materializing a checkout.
-* **Security:** Reject include patterns that escape or select the repository root, and
-  reserve hsync and deployment control directories from synchronization.
+* **Security:** Reject unsafe configuration, workspace, and checkout paths;
+  exclude control directories and `.git` from synchronization and deployment
+  payloads.
 
 ## v0.1.0 (2026-07-31)
 
@@ -44,5 +35,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * Added the `Sync`, `Repository`, `Payload`, `Changeset`, `SyncStatus`, and
   `Index` public model. `Index` is the mutable publication index for immutable
   manifests.
-* Added the standalone `hsync init` command for hsync-unaware site generators
-  and CI pipelines.
+* Added the standalone `hypersync init` and `hypersync reconcile` commands for
+  HyperSync-unaware site generators and CI pipelines.

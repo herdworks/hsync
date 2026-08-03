@@ -94,6 +94,18 @@ func TestDeploymentPrepareBuildsProviderPlanAfterSync(t *testing.T) {
 	}
 }
 
+func TestSyncFromConfigRejectsRepositoryPayload(t *testing.T) {
+	root := t.TempDir()
+	configPath := writeDeploymentConfig(t, root, "https://example.test", []string{"content/**"})
+	configBytes, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := SyncFromConfig(context.Background(), configPath, configBytes, root, nil, fixedNow()); err == nil {
+		t.Fatal("SyncFromConfig() error = nil for repository payload")
+	}
+}
+
 func TestDeploymentExecutesOrdinaryDeploymentAfterNoopSync(t *testing.T) {
 	resetFacadeEngine()
 	workspace := t.TempDir()
@@ -123,7 +135,7 @@ func TestDeploymentExecutesOrdinaryDeploymentAfterNoopSync(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	configPath := writeDeploymentConfig(t, workspace, server.URL, nil)
+	configPath := writeDeploymentConfig(t, workspace, server.URL, []string{"content/**"})
 	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: hyperproviders.CompleteDeployment, Now: fixedNow}
 	if err := deployment.Execute(context.Background(), nil, io.Discard); err != nil {
 		t.Fatal(err)
@@ -141,7 +153,7 @@ func TestDeploymentUsesOneConfigSnapshotForSyncAndProviders(t *testing.T) {
 	workspace, payload := t.TempDir(), t.TempDir()
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
-	configPath := writeDeploymentConfig(t, workspace, server.URL, nil)
+	configPath := writeDeploymentConfig(t, workspace, server.URL, []string{"content/**"})
 	configBytes, err := os.ReadFile(configPath)
 	if err != nil {
 		t.Fatal(err)
@@ -173,6 +185,24 @@ func TestDeploymentUsesEnvironmentFromConfig(t *testing.T) {
 	}
 	if facadeEngine.calls != 1 || deployment.Status() != hyperproviders.DeploymentSucceeded {
 		t.Fatalf("calls = %d, deployment status = %q", facadeEngine.calls, deployment.Status())
+	}
+}
+
+func TestDeploymentUsesHsyncEnvironmentByDefault(t *testing.T) {
+	resetFacadeEngine()
+	workspace, payload := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(payload, "index.html"), "page")
+	configPath := filepath.Join(workspace, "site.yaml")
+	config := "providers:\n  test:\n    kind: " + facadeProviderKind + "\n    endpoint: https://provider.example\nenvironments:\n  hsync:\n    - test\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Kind: hyperproviders.CompleteDeployment}
+	if err := deployment.Execute(context.Background(), nil, io.Discard); err != nil {
+		t.Fatal(err)
+	}
+	if facadeEngine.calls != 1 {
+		t.Fatalf("provider calls = %d, want 1", facadeEngine.calls)
 	}
 }
 

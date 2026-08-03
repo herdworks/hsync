@@ -22,6 +22,17 @@ type PullOptions struct {
 	Output io.Writer
 }
 
+type remoteSelection struct {
+	path   string
+	live   ManifestEntry
+	liveOK bool
+}
+
+type pullPlan struct {
+	materialize []remoteSelection
+	skipped     []string
+}
+
 // Pull reconciles a configured checkout with the current clean remote revision.
 // Remote-selected changes are materialized while genuinely divergent local
 // workspace revisions retain local-wins behavior.
@@ -96,17 +107,6 @@ func PullWithOptions(ctx context.Context, directory string, config SyncConfig, o
 	return PullResult{IndexURL: remote.BaseURL.String() + remote.SyncPath, ManifestID: index.Published, Status: "updated"}, nil
 }
 
-type remoteSelection struct {
-	path   string
-	live   ManifestEntry
-	liveOK bool
-}
-
-type pullPlan struct {
-	materialize []remoteSelection
-	skipped     []string
-}
-
 func remoteSelections(base, live Manifest, workspace Snapshot, resolved Manifest) pullPlan {
 	baseEntries, liveEntries := entriesByPath(base.Entries), entriesByPath(live.Entries)
 	paths := map[string]struct{}{}
@@ -156,6 +156,9 @@ func materializeRemoteSelections(ctx context.Context, root string, downloads []M
 			return err
 		}
 		if err := os.Remove(filename); err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		if err := writeDownloadProgress(output, "file %s deleted", selection.path); err != nil {
 			return err
 		}
 	}

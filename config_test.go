@@ -70,33 +70,35 @@ func TestSyncConfigWithoutIncludeDoesNotScan(t *testing.T) {
 	}
 }
 
-func TestSyncConfigRejectsRootIncludePaths(t *testing.T) {
+func TestSyncConfigRejectsEscapingIncludePaths(t *testing.T) {
 	t.Parallel()
 
-	for _, pattern := range []string{".", "*", "**", "../content/**", "/content/**", "content/../../secrets/**"} {
+	for _, pattern := range []string{".", "../content/**", "content/../../secrets/**"} {
 		config := SyncConfig{
 			Remote:  "https://example.com/.sync/index.json",
 			Include: Rules{Paths: []string{pattern}},
 		}
 		if err := config.Validate(); err == nil {
-			t.Errorf("Validate() error = nil for root or escaping include %q", pattern)
+			t.Errorf("Validate() error = nil for escaping include %q", pattern)
 		}
 	}
-	valid := SyncConfig{
-		Remote:  "https://example.com/.sync/index.json",
-		Include: Rules{Paths: []string{"content/**"}},
-	}
-	if err := valid.Validate(); err != nil {
-		t.Fatalf("Validate() error = %v for a nested include", err)
+	for _, pattern := range []string{"*", "**", "/content/**", "content/**"} {
+		valid := SyncConfig{
+			Remote:  "https://example.com/.sync/index.json",
+			Include: Rules{Paths: []string{pattern}},
+		}
+		if err := valid.Validate(); err != nil {
+			t.Fatalf("Validate() error = %v for valid include %q", err, pattern)
+		}
 	}
 }
 
-func TestConfigPathAtUsesRepositoryRoot(t *testing.T) {
+func TestDiscoverConfigUsesRepositoryRoot(t *testing.T) {
 	root := t.TempDir()
 	if err := os.WriteFile(filepath.Join(root, DefaultConfigPath), []byte("sync: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	filename, err := ConfigPathAt(root, "")
+	filename, err := DiscoverConfig(root)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,58 +107,78 @@ func TestConfigPathAtUsesRepositoryRoot(t *testing.T) {
 	}
 }
 
-func TestConfigPathAtUsesExplicitThenEnvironmentBeforeDetection(t *testing.T) {
+func TestReadConfigRecordsPath(t *testing.T) {
 	root := t.TempDir()
-	for _, name := range []string{"hsync.yaml", "hsync.json", ".hsync.yaml"} {
-		if err := os.WriteFile(filepath.Join(root, name), []byte("sync: {}\n"), 0o644); err != nil {
-			t.Fatal(err)
-		}
+	expected := filepath.Join(root, "site.yaml")
+	if err := os.WriteFile(expected, []byte("sync: {}\n"), 0o644); err != nil {
+		t.Fatal(err)
 	}
-	t.Setenv("HSYNC_CONFIG", "hsync.json")
-	filename, err := ConfigPathAt(root, "")
+	config, raw, err := ReadConfig(expected)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := filepath.Join(root, "hsync.json"); filename != want {
-		t.Fatalf("environment config = %q, want %q", filename, want)
+	if config.Path != expected {
+		t.Fatalf("config path = %q, want %q", config.Path, expected)
 	}
-	filename, err = ConfigPathAt(root, ".hsync.yaml")
-	if err != nil {
-		t.Fatal(err)
+	if got, want := config.Directory(), root; got != want {
+		t.Fatalf("config directory = %q, want %q", got, want)
 	}
-	if want := filepath.Join(root, ".hsync.yaml"); filename != want {
-		t.Fatalf("explicit config = %q, want %q", filename, want)
+	if string(raw) != "sync: {}\n" {
+		t.Fatalf("raw config = %q", raw)
 	}
 }
 
-func TestConfigPathAtRejectsAmbiguousDetection(t *testing.T) {
+func TestDiscoverConfigRejectsAmbiguity(t *testing.T) {
 	root := t.TempDir()
 	for _, name := range []string{"hsync.yaml", "hsync.json"} {
 		if err := os.WriteFile(filepath.Join(root, name), []byte("sync: {}\n"), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if _, err := ConfigPathAt(root, ""); err == nil {
-		t.Fatal("ConfigPathAt() error = nil")
+	if _, err := DiscoverConfig(root); err == nil {
+		t.Fatal("DiscoverConfig() error = nil")
 	}
 }
 
-func TestConfigPathAtRejectsOutsideAndSymlink(t *testing.T) {
+func TestReadConfigUsesConfigParentAndDiscoverRejectsSymlink(t *testing.T) {
 	root := t.TempDir()
 	outside := t.TempDir()
 	outsideConfig := filepath.Join(outside, DefaultConfigPath)
 	if err := os.WriteFile(outsideConfig, []byte("sync: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ConfigPathAt(root, outsideConfig); err == nil {
-		t.Fatal("ConfigPathAt() error = nil for outside configuration")
+	config, _, err := ReadConfig(outsideConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Directory() != outside {
+		t.Fatalf("config directory = %q, want %q", config.Directory(), outside)
 	}
 	link := filepath.Join(root, DefaultConfigPath)
 	if err := os.Symlink(outsideConfig, link); err != nil {
 		t.Skipf("symlink unavailable: %v", err)
 	}
-	if _, err := ConfigPathAt(root, ""); err == nil {
-		t.Fatal("ConfigPathAt() error = nil for symlink")
+	if _, err := DiscoverConfig(root); err == nil {
+		t.Fatal("DiscoverConfig() error = nil for symlink")
+	}
+}
+
+func TestRepositoryConfigDirectoryWithoutPathIsEmpty(t *testing.T) {
+	if got := (RepositoryConfig{}).Directory(); got != "" {
+		t.Fatalf("directory = %q, want empty", got)
+	}
+}
+
+func TestParseConfigAcceptsJSON(t *testing.T) {
+	config, err := ParseConfig([]byte(`{"sync":{"remote":"https://example.com/.hsync/index.json"}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Sync == nil || config.Sync.Remote != "https://example.com/.hsync/index.json" {
+		t.Fatalf("parsed config = %#v", config)
+	}
+	if config.Path != "" {
+		t.Fatalf("parsed config path = %q, want empty", config.Path)
 	}
 }
 
@@ -185,5 +207,45 @@ func TestInitializeConfigAcceptsAbsoluteRootConfigPath(t *testing.T) {
 	}
 	if _, err := os.Stat(filename); err != nil {
 		t.Fatalf("config was not created: %v", err)
+	}
+}
+
+func TestGitignoreLikePathExpressions(t *testing.T) {
+	expressions, err := parseGitIgnore("# comment\nsecret\n/root.txt\ncache/\n!cache/keep.txt\n\\#literal\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"nested/secret", "root.txt", "cache/drop.txt", "#literal"} {
+		if allowed := (gitignoreRules{expressions: expressions}).Allows(path); allowed {
+			t.Fatalf("%q unexpectedly allowed", path)
+		}
+	}
+	if !(gitignoreRules{expressions: expressions}).Allows("nested/root.txt") {
+		t.Fatal("root-anchored rule matched nested file")
+	}
+	if !(gitignoreRules{expressions: expressions}).Allows("cache/keep.txt") {
+		t.Fatal("negated later rule did not re-allow file")
+	}
+}
+
+func TestConfiguredPathExpressionsUseGitignoreLikeMatching(t *testing.T) {
+	expressions, err := parsePathExpressions([]string{"*.tmp", "!keep.tmp", "/root.txt", "cache/"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		path string
+		want bool
+	}{
+		{"nested/file.tmp", true},
+		{"keep.tmp", false},
+		{"root.txt", true},
+		{"nested/root.txt", false},
+		{"cache/value.txt", true},
+	} {
+		matched, got := expressions.match(test.path)
+		if got != test.want || (test.want && !matched) {
+			t.Fatalf("match(%q) = (%v, %v), want positive=%v", test.path, matched, got, test.want)
+		}
 	}
 }

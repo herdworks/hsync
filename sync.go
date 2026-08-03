@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sort"
 	"time"
 )
@@ -52,6 +53,9 @@ func (sync *Sync) Prepare(ctx context.Context) error {
 	}
 	now := sync.now()
 	_, baseID, base, err := sync.Repository.LoadManifest()
+	if errors.Is(err, os.ErrNotExist) {
+		return sync.prepareInitial(ctx, now)
+	}
 	if err != nil {
 		return fmt.Errorf("load local manifest: %w", err)
 	}
@@ -68,7 +72,7 @@ func (sync *Sync) Prepare(ctx context.Context) error {
 		if base.Parent != "" {
 			return fmt.Errorf("%w: local base has a parent but live index is absent", ErrManualResolution)
 		}
-		changeset, err := initialChangeset(base, local)
+		changeset, err := initialChangeset(base.SyncPath, local)
 		if err != nil {
 			return err
 		}
@@ -142,6 +146,37 @@ func (sync *Sync) Finalize(ctx context.Context) error {
 	return nil
 }
 
+func (sync *Sync) prepareInitial(ctx context.Context, now time.Time) error {
+	observedIndex, err := sync.Remote.ReadIndex(ctx)
+	if err == nil {
+		if _, err := ParseIndex(observedIndex); err != nil {
+			return err
+		}
+		return fmt.Errorf("%w: remote index exists but this repository has no local manifest", ErrManualResolution)
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return fmt.Errorf("read live index: %w", err)
+	}
+	local, err := sync.Repository.snapshot(nil)
+	if err != nil {
+		return err
+	}
+	changeset, err := initialChangeset(sync.Remote.SyncPath, local)
+	if err != nil {
+		return err
+	}
+	prepared, err := completeChangeset(changeset, nil, now)
+	if err != nil {
+		return err
+	}
+	if err := prepared.Apply(sync.Payload); err != nil {
+		return err
+	}
+	sync.Changeset = prepared
+	sync.Status = SyncStatus{Status: StatusPrepared}
+	return nil
+}
+
 func (sync Sync) now() time.Time {
 	if sync.Now != nil {
 		return sync.Now().UTC()
@@ -149,16 +184,16 @@ func (sync Sync) now() time.Time {
 	return time.Now().UTC()
 }
 
-func initialChangeset(base Manifest, snapshot Snapshot) (Changeset, error) {
+func initialChangeset(syncPath string, snapshot Snapshot) (Changeset, error) {
 	entries := make([]ManifestEntry, 0, len(snapshot.Entries))
 	for _, entry := range snapshot.Entries {
 		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
-	manifest := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: entries}
+	manifest := Manifest{Version: Version, SyncPath: syncPath, Entries: entries}
 	raw, id, err := SerializeManifest(manifest)
 	if err != nil {
 		return Changeset{}, err
 	}
-	return Changeset{ManifestID: id, Manifest: raw, Blobs: snapshot.Blobs, syncPath: base.SyncPath, manifest: manifest}, nil
+	return Changeset{ManifestID: id, Manifest: raw, Blobs: snapshot.Blobs, syncPath: syncPath, manifest: manifest}, nil
 }

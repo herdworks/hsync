@@ -100,12 +100,11 @@ func pullCommand() *cli.Command {
 			Usage:       "hsync pull [directory] [--config path]",
 			Validator:   atMostOneDirectory,
 			Handler: func(cmd *cli.Command) error {
-				directory := commandDirectory(cmd)
-				config, err := loadSyncConfig(directory, cmd.Options.Get("config"))
+				config, err := commandSyncConfig(commandDirectory(cmd), cmd.Options.Get("config"))
 				if err != nil {
 					return err
 				}
-				result, err := hsync.PullWithOptions(context.Background(), directory, config, hsync.PullOptions{Output: os.Stdout})
+				result, err := hsync.PullWithOptions(context.Background(), config.Directory(), *config.Sync, hsync.PullOptions{Output: os.Stdout})
 				if err != nil {
 					return err
 				}
@@ -121,10 +120,10 @@ func pushCommand() *cli.Command {
 		Config: cli.CommandConfig{
 			Name:        "push",
 			Description: "Push local changes to the remote.",
-			Usage:       "hsync push <directory> [--config path] [options]",
+			Usage:       "hsync push [--config path] [options]",
 			Validator: func(cmd *cli.Command) error {
-				if len(cmd.Args) != 1 {
-					return fmt.Errorf("push requires exactly one checkout directory")
+				if len(cmd.Args) != 0 {
+					return fmt.Errorf("push accepts no positional arguments; use --config to select a repository")
 				}
 				if cmd.Options.Get("environment") != "" && cmd.Options.Get("providers") != "" {
 					return fmt.Errorf("--providers and --environment are mutually exclusive")
@@ -132,11 +131,14 @@ func pushCommand() *cli.Command {
 				return nil
 			},
 			Handler: func(cmd *cli.Command) error {
-				configPath, err := hsync.ConfigPathAt(cmd.Args[0], cmd.Options.Get("config"))
+				configPath, err := commandConfigPath(".", cmd.Options.Get("config"))
 				if err != nil {
 					return err
 				}
-				return hsync.Push(context.Background(), cmd.Args[0], hsync.PushOptions{
+				if configPath == "" {
+					return fmt.Errorf("hsync configuration is required; use --config, HSYNC_CONFIG, or add hsync.yaml, hsync.json, .hsync.yaml, or .hsync.json at the repository root")
+				}
+				return hsync.Push(context.Background(), hsync.PushOptions{
 					ConfigPath:  configPath,
 					Environment: cmd.Options.Get("environment"),
 					Providers:   hsync.SplitPatterns(cmd.Options.Get("providers")),
@@ -145,7 +147,7 @@ func pushCommand() *cli.Command {
 		},
 		Options: cli.CommandOptions{
 			{Name: "config", ShortName: "c", Description: "Configuration path (or HSYNC_CONFIG / detected hsync config)."},
-			{Name: "environment", ShortName: "e", Description: "Deployment environment."},
+			{Name: "environment", ShortName: "e", Description: "Deployment environment (default: hsync)."},
 			{Name: "providers", Description: "Comma-separated provider names."},
 		},
 	}
@@ -159,12 +161,11 @@ func resetCommand() *cli.Command {
 			Usage:       "hsync reset [directory] [--config path] [--interactive]",
 			Validator:   atMostOneDirectory,
 			Handler: func(cmd *cli.Command) error {
-				directory := commandDirectory(cmd)
-				config, err := loadSyncConfig(directory, cmd.Options.Get("config"))
+				config, err := commandSyncConfig(commandDirectory(cmd), cmd.Options.Get("config"))
 				if err != nil {
 					return err
 				}
-				repository, remote, err := hsync.OpenCheckout(directory, config, nil)
+				repository, remote, err := hsync.OpenCheckout(config.Directory(), *config.Sync, nil)
 				if err != nil {
 					return err
 				}
@@ -191,27 +192,21 @@ func statusCommand() *cli.Command {
 			Usage:       "hsync status [directory] [--config path]",
 			Validator:   atMostOneDirectory,
 			Handler: func(cmd *cli.Command) error {
-				directory := commandDirectory(cmd)
-				config, err := loadSyncConfig(directory, cmd.Options.Get("config"))
+				config, err := commandSyncConfig(commandDirectory(cmd), cmd.Options.Get("config"))
 				if err != nil {
 					return err
 				}
-				repository, err := hsync.OpenRepository(directory)
+				repository, err := hsync.OpenRepository(config.Directory())
 				if err != nil {
 					return err
 				}
-				repository.Config = &config
+				repository.Config = config.Sync
 				result, err := repository.Status()
 				if err != nil {
 					return err
 				}
 				for _, change := range result.Changes {
-					prefix := map[hsync.ChangeKind]string{
-						hsync.ChangeAdded:    "A",
-						hsync.ChangeModified: "M",
-						hsync.ChangeDeleted:  "D",
-					}[change.Kind]
-					fmt.Printf("%s %s\n", prefix, change.Path)
+					fmt.Println(formatStatus(change))
 				}
 				return nil
 			},
@@ -219,20 +214,47 @@ func statusCommand() *cli.Command {
 	}
 }
 
-func loadSyncConfig(root, explicit string) (hsync.SyncConfig, error) {
-	path, err := hsync.ConfigPathAt(root, explicit)
+func formatStatus(change hsync.Change) string {
+	return fmt.Sprintf("%10.10s %s", change.Kind, change.Path)
+}
+
+func commandConfigPath(root, explicit string) (string, error) {
+	if explicit == "" {
+		explicit = os.Getenv("HSYNC_CONFIG")
+	}
+	if explicit != "" {
+		return explicit, nil
+	}
+	return hsync.DiscoverConfig(root)
+}
+
+func commandSyncConfig(root, explicit string) (hsync.RepositoryConfig, error) {
+	path, err := commandConfigPath(root, explicit)
 	if err != nil {
-		return hsync.SyncConfig{}, err
+		return hsync.RepositoryConfig{}, err
 	}
 	if path == "" {
-		return hsync.SyncConfig{}, fmt.Errorf("hsync configuration is required; use --config, HSYNC_CONFIG, or add hsync.yaml, hsync.json, .hsync.yaml, or .hsync.json at the repository root")
+		return hsync.RepositoryConfig{}, fmt.Errorf("hsync configuration is required; use --config, HSYNC_CONFIG, or add hsync.yaml, hsync.json, .hsync.yaml, or .hsync.json at the repository root")
 	}
-	return hsync.LoadSyncConfig(path)
+	config, _, err := hsync.ReadConfig(path)
+	if err != nil {
+		return hsync.RepositoryConfig{}, err
+	}
+	if config.Sync == nil {
+		return hsync.RepositoryConfig{}, fmt.Errorf("configuration sync is empty")
+	}
+	if err := config.Sync.Validate(); err != nil {
+		return hsync.RepositoryConfig{}, err
+	}
+	return config, nil
 }
 
 func atMostOneDirectory(cmd *cli.Command) error {
 	if len(cmd.Args) > 1 {
 		return fmt.Errorf("%s accepts at most one directory", cmd.Config.Name)
+	}
+	if len(cmd.Args) == 1 && (cmd.Options.Get("config") != "" || os.Getenv("HSYNC_CONFIG") != "") {
+		return fmt.Errorf("%s cannot combine a directory with --config or HSYNC_CONFIG", cmd.Config.Name)
 	}
 	return nil
 }

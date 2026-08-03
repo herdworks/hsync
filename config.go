@@ -10,10 +10,20 @@ import (
 	"path/filepath"
 	"strings"
 
+	"gopkg.in/yaml.v3"
+
 	"github.com/herdworks/hyperfiles-go/mimetypes"
 	hyperproviders "github.com/herdworks/hyperproviders-go"
-	"gopkg.in/yaml.v3"
 )
+
+// RepositoryConfig is the hsync-relevant subset of a repository-root project
+// configuration. Unrelated top-level keys are ignored.
+type RepositoryConfig struct {
+	Path         string                                 `json:"-" yaml:"-"`
+	Providers    hyperproviders.HostingProviders        `json:"providers" yaml:"providers"`
+	Environments map[string]*hyperproviders.Environment `json:"environments,omitempty" yaml:"environments,omitempty"`
+	Sync         *SyncConfig                            `json:"sync,omitempty" yaml:"sync,omitempty"`
+}
 
 // SyncConfig configures local synchronization policy. It is external to the
 // immutable manifest so changing it becomes an ordinary synchronized file
@@ -32,96 +42,43 @@ type Rules struct {
 	Mimetypes []string `json:"mimetypes,omitempty" yaml:"mimetypes,omitempty"`
 }
 
+// PathExpression is the deliberately small, gitignore-like path language
+// shared by sync configuration and the repository-root .gitignore file.
+type PathExpression struct {
+	pattern   string
+	negated   bool
+	directory bool
+	rooted    bool
+	basename  bool
+}
+
+type PathExpressions []PathExpression
+
 // SyncPolicy is the evaluated file-selection policy for one local snapshot.
 type SyncPolicy struct {
-	include  Rules
-	ignore   Rules
-	maxBytes int64
+	includePaths PathExpressions
+	includeTypes []string
+	ignorePaths  PathExpressions
+	ignoreTypes  []string
+	maxBytes     int64
 }
 
 const DefaultConfigPath = "hsync.yaml"
 
 const DefaultIndexPath = "/.hsync/index.json"
 
+// DefaultEnvironment is the provider environment selected by hsync commands
+// when a caller does not select providers or an environment explicitly.
+const DefaultEnvironment = "hsync"
+
 var configCandidates = []string{"hsync.yaml", "hsync.json", ".hsync.yaml", ".hsync.json"}
 
-// ConfigPath resolves an explicit path, HSYNC_CONFIG, or one unambiguous
-// configuration file in the current repository root. It never accepts
-// symlinks.
-func ConfigPath(explicit string) (string, error) {
-	return ConfigPathAt(".", explicit)
-}
-
-// ConfigPathAt resolves an explicit path, HSYNC_CONFIG, or one unambiguous
-// configuration file at root. A configuration file must be a regular file at
-// the repository root; relative explicit paths are resolved from root.
-func ConfigPathAt(root, explicit string) (string, error) {
-	configured := explicit
-	if configured == "" {
-		configured = os.Getenv("HSYNC_CONFIG")
+// Directory returns the repository root containing this configuration.
+func (config RepositoryConfig) Directory() string {
+	if config.Path == "" {
+		return ""
 	}
-	if configured != "" {
-		return regularConfigPathAt(root, configured)
-	}
-	var found string
-	for _, candidate := range configCandidates {
-		filename, err := regularConfigPathAt(root, candidate)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
-		}
-		if err != nil {
-			return "", err
-		}
-		if found != "" {
-			return "", fmt.Errorf("multiple hsync configuration files found; specify --config")
-		}
-		found = filename
-	}
-	return found, nil
-}
-
-// InitializeConfig creates a new repository-root configuration with no
-// deployment providers and synchronization enabled for remote.
-func InitializeConfig(filename, remote string) error {
-	if filename == "" {
-		filename = DefaultConfigPath
-	}
-	root := "."
-	if filepath.IsAbs(filename) {
-		root, filename = filepath.Dir(filename), filepath.Base(filename)
-	}
-	target, err := configTarget(root, filename)
-	if err != nil {
-		return err
-	}
-	target, err = safeWriteTarget(root, target)
-	if err != nil {
-		return err
-	}
-	if _, err := os.Lstat(target); err == nil || !errors.Is(err, os.ErrNotExist) {
-		if err == nil {
-			return fmt.Errorf("hsync config already exists: %s", target)
-		}
-		return err
-	}
-	config := struct {
-		Providers    hyperproviders.HostingProviders        `json:"providers" yaml:"providers"`
-		Environments map[string]*hyperproviders.Environment `json:"environments" yaml:"environments"`
-		Sync         *SyncConfig                            `json:"sync" yaml:"sync"`
-	}{Providers: hyperproviders.HostingProviders{}, Environments: map[string]*hyperproviders.Environment{}, Sync: &SyncConfig{Remote: remote}}
-	if err := config.Sync.Validate(); err != nil {
-		return err
-	}
-	var raw []byte
-	if strings.EqualFold(filepath.Ext(target), ".json") {
-		raw, err = json.MarshalIndent(config, "", "  ")
-	} else {
-		raw, err = yaml.Marshal(config)
-	}
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(target, append(raw, '\n'), 0o644)
+	return filepath.Dir(config.Path)
 }
 
 // Validate checks a complete local synchronization configuration.
@@ -178,16 +135,29 @@ func (config SyncConfig) Policy(reserved ...string) (SyncPolicy, error) {
 	if err != nil {
 		return SyncPolicy{}, fmt.Errorf("%w: %v", ErrInvalidState, err)
 	}
-	policy := SyncPolicy{
-		include:  Rules{Paths: append([]string(nil), config.Include.Paths...), Mimetypes: append([]string(nil), config.Include.Mimetypes...)},
-		ignore:   Rules{Paths: append([]string(nil), config.Ignore.Paths...), Mimetypes: append([]string(nil), config.Ignore.Mimetypes...)},
-		maxBytes: maxBytes,
+	includePaths, err := parsePathExpressions(config.Include.Paths)
+	if err != nil {
+		return SyncPolicy{}, fmt.Errorf("%w: invalid include path expression: %v", ErrInvalidState, err)
 	}
-	policy.ignore.Paths = append(policy.ignore.Paths, reserved...)
-	if err := validateRules(policy.include, policy.ignore); err != nil {
+	ignoreValues := append([]string(nil), config.Ignore.Paths...)
+	ignoreValues = append(ignoreValues, reserved...)
+	ignorePaths, err := parsePathExpressions(ignoreValues)
+	if err != nil {
+		return SyncPolicy{}, fmt.Errorf("%w: invalid ignore path expression: %v", ErrInvalidState, err)
+	}
+	if err := validateMimetypeExpressions(config.Include.Mimetypes); err != nil {
 		return SyncPolicy{}, err
 	}
-	return policy, nil
+	if err := validateMimetypeExpressions(config.Ignore.Mimetypes); err != nil {
+		return SyncPolicy{}, err
+	}
+	return SyncPolicy{
+		includePaths: includePaths,
+		includeTypes: append([]string(nil), config.Include.Mimetypes...),
+		ignorePaths:  ignorePaths,
+		ignoreTypes:  append([]string(nil), config.Ignore.Mimetypes...),
+		maxBytes:     maxBytes,
+	}, nil
 }
 
 // Allows reports whether entry remains after the ignore and size rules are
@@ -200,7 +170,8 @@ func (policy SyncPolicy) Allows(entry ManifestEntry) bool {
 	if policy.maxBytes > 0 && entry.Size > policy.maxBytes {
 		return false
 	}
-	return !matchesAny(policy.ignore.Paths, entry.Path) && !matchesAny(policy.ignore.Mimetypes, base)
+	matched, ignored := policy.ignorePaths.match(entry.Path)
+	return !(matched && ignored) && !matchesAny(policy.ignoreTypes, base)
 }
 
 // Includes reports whether entry is eligible for discovery. An empty include
@@ -214,31 +185,219 @@ func (policy SyncPolicy) Includes(entry ManifestEntry) bool {
 	if err != nil {
 		return false
 	}
-	return (len(policy.include.Paths) == 0 || matchesAny(policy.include.Paths, entry.Path)) &&
-		(len(policy.include.Mimetypes) == 0 || matchesAny(policy.include.Mimetypes, base))
+	matched, included := policy.includePaths.match(entry.Path)
+	pathIncluded := len(policy.includePaths) == 0 || (matched && included)
+	return pathIncluded &&
+		(len(policy.includeTypes) == 0 || matchesAny(policy.includeTypes, base))
 }
 
 // ScanningEnabled reports whether config can discover files that are not already tracked.
 func (policy SyncPolicy) ScanningEnabled() bool {
-	return len(policy.include.Paths) != 0 || len(policy.include.Mimetypes) != 0
+	return policy.includePaths.hasPositive() || len(policy.includeTypes) != 0
 }
 
-func validateRules(include, ignore Rules) error {
-	for _, pattern := range include.Paths {
-		if err := validateIncludeGlob(pattern); err != nil {
-			return fmt.Errorf("%w: invalid include path glob %q: %v", ErrInvalidState, pattern, err)
+func (expressions PathExpressions) match(value string) (bool, bool) {
+	matched, positive := false, false
+	for _, expression := range expressions {
+		if !expression.matches(value) {
+			continue
+		}
+		matched = true
+		positive = !expression.negated
+	}
+	return matched, positive
+}
+
+func (expressions PathExpressions) hasPositive() bool {
+	for _, expression := range expressions {
+		if !expression.negated {
+			return true
 		}
 	}
-	for _, pattern := range ignore.Paths {
-		if err := validateGlob(pattern); err != nil {
-			return fmt.Errorf("%w: invalid path glob %q: %v", ErrInvalidState, pattern, err)
-		}
-	}
-	for _, rules := range []Rules{include, ignore} {
-		for _, pattern := range rules.Mimetypes {
-			if _, err := path.Match(pattern, ""); err != nil {
-				return fmt.Errorf("%w: invalid MIME glob %q: %v", ErrInvalidState, pattern, err)
+	return false
+}
+
+func (expression PathExpression) matches(value string) bool {
+	if expression.directory {
+		parts := strings.Split(value, "/")
+		for end := 1; end < len(parts); end++ {
+			if expression.matchesPath(strings.Join(parts[:end], "/")) {
+				return true
 			}
+		}
+		return false
+	}
+	return expression.matchesPath(value)
+}
+
+func (expression PathExpression) matchesPath(value string) bool {
+	if expression.basename {
+		for _, part := range strings.Split(value, "/") {
+			matched, err := path.Match(expression.pattern, part)
+			if err == nil && matched {
+				return true
+			}
+		}
+		return false
+	}
+	return globMatch(expression.pattern, value)
+}
+
+// DiscoverConfig returns one unambiguous default configuration directly under
+// directory. It returns an empty path when none is present.
+func DiscoverConfig(directory string) (string, error) {
+	var found string
+	for _, candidate := range configCandidates {
+		filename, err := regularConfigPathAt(directory, candidate)
+		if errors.Is(err, os.ErrNotExist) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		if found != "" {
+			return "", fmt.Errorf("multiple hsync configuration files found; specify --config")
+		}
+		found = filename
+	}
+	return found, nil
+}
+
+// ReadConfig reads and parses a regular repository-root configuration file.
+// It returns the exact bytes used for parsing and records the resolved path on
+// the returned configuration.
+func ReadConfig(filename string) (RepositoryConfig, []byte, error) {
+	target, err := regularConfigPathAt(filepath.Dir(filename), filepath.Base(filename))
+	if err != nil {
+		return RepositoryConfig{}, nil, err
+	}
+	raw, err := os.ReadFile(target)
+	if err != nil {
+		return RepositoryConfig{}, nil, err
+	}
+	config, err := ParseConfig(raw)
+	if err != nil {
+		return RepositoryConfig{}, nil, err
+	}
+	config.Path = target
+	return config, raw, nil
+}
+
+// ParseConfig parses a repository configuration without accessing the
+// filesystem. JSON is valid YAML and is accepted by the YAML parser.
+func ParseConfig(raw []byte) (RepositoryConfig, error) {
+	var config RepositoryConfig
+	if err := yaml.Unmarshal(raw, &config); err != nil {
+		return RepositoryConfig{}, fmt.Errorf("parse configuration: %w", err)
+	}
+	return config, nil
+}
+
+// InitializeConfig creates a new repository-root configuration with no
+// deployment providers and synchronization enabled for remote.
+func InitializeConfig(filename, remote string) error {
+	if filename == "" {
+		filename = DefaultConfigPath
+	}
+	root := "."
+	if filepath.IsAbs(filename) {
+		root, filename = filepath.Dir(filename), filepath.Base(filename)
+	}
+	target, err := configTarget(root, filename)
+	if err != nil {
+		return err
+	}
+	target, err = safeWriteTarget(root, target)
+	if err != nil {
+		return err
+	}
+	if _, err := os.Lstat(target); err == nil || !errors.Is(err, os.ErrNotExist) {
+		if err == nil {
+			return fmt.Errorf("hsync config already exists: %s", target)
+		}
+		return err
+	}
+	config := RepositoryConfig{Providers: hyperproviders.HostingProviders{}, Environments: map[string]*hyperproviders.Environment{}, Sync: &SyncConfig{Remote: remote}}
+	if err := config.Sync.Validate(); err != nil {
+		return err
+	}
+	var raw []byte
+	if strings.EqualFold(filepath.Ext(target), ".json") {
+		raw, err = json.MarshalIndent(config, "", "  ")
+	} else {
+		raw, err = yaml.Marshal(config)
+	}
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(target, append(raw, '\n'), 0o644)
+}
+
+func parsePathExpressions(values []string) (PathExpressions, error) {
+	expressions := make(PathExpressions, 0, len(values))
+	for _, value := range values {
+		expression, err := parsePathExpression(value, false)
+		if err != nil {
+			return nil, err
+		}
+		expressions = append(expressions, expression)
+	}
+	return expressions, nil
+}
+
+func parseGitIgnore(raw string) (PathExpressions, error) {
+	var expressions PathExpressions
+	for _, line := range strings.Split(raw, "\n") {
+		line = strings.TrimSuffix(line, "\r")
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		expression, err := parsePathExpression(line, true)
+		if err != nil {
+			return nil, err
+		}
+		expressions = append(expressions, expression)
+	}
+	return expressions, nil
+}
+
+func parsePathExpression(value string, gitignore bool) (PathExpression, error) {
+	if gitignore {
+		value = strings.TrimRight(value, " ")
+		if strings.HasPrefix(value, "\\ ") {
+			value = strings.TrimSuffix(value, " ") + " "
+		}
+	}
+	expression := PathExpression{}
+	if strings.HasPrefix(value, "\\#") || strings.HasPrefix(value, "\\!") {
+		value = value[1:]
+	} else if strings.HasPrefix(value, "!") {
+		expression.negated = true
+		value = value[1:]
+	}
+	if strings.HasPrefix(value, "/") {
+		expression.rooted = true
+		value = strings.TrimPrefix(value, "/")
+	}
+	if strings.HasSuffix(value, "/") {
+		expression.directory = true
+		value = strings.TrimSuffix(value, "/")
+	}
+	if value == "" || value == "." || strings.HasPrefix(value, "../") || strings.Contains(value, "//") || path.Clean(value) != value {
+		return PathExpression{}, fmt.Errorf("invalid path expression %q", value)
+	}
+	if err := validateGlob(value); err != nil {
+		return PathExpression{}, fmt.Errorf("invalid path expression %q: %w", value, err)
+	}
+	expression.pattern = value
+	expression.basename = !expression.rooted && !strings.Contains(value, "/")
+	return expression, nil
+}
+
+func validateMimetypeExpressions(expressions []string) error {
+	for _, expression := range expressions {
+		if _, err := path.Match(expression, ""); err != nil {
+			return fmt.Errorf("%w: invalid MIME expression %q: %v", ErrInvalidState, expression, err)
 		}
 	}
 	return nil
