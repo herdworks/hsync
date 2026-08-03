@@ -11,7 +11,7 @@ func TestRepositoryStatus(t *testing.T) {
 	workspace := t.TempDir()
 	config := &SyncConfig{Include: Rules{Paths: []string{"added.txt", "deleted.txt", "modified.txt", "unchanged.txt"}}}
 	base := Manifest{
-		Version:  Version,
+		Version:  ManifestVersion,
 		SyncPath: "/.sync/latest.json",
 		Entries: []ManifestEntry{
 			{Path: "deleted.txt", Blob: NewIdentifier([]byte("deleted")), Size: 7, Mimetype: "text/plain"},
@@ -60,7 +60,7 @@ func TestRepositoryStatus(t *testing.T) {
 func TestRepositoryStatusWithoutIncludeTracksOnlyManifestEntries(t *testing.T) {
 	workspace := t.TempDir()
 	base := Manifest{
-		Version: Version, SyncPath: "/.sync/latest.json",
+		Version: ManifestVersion, SyncPath: "/.sync/latest.json",
 		Entries: []ManifestEntry{{Path: "tracked.txt", Blob: NewIdentifier([]byte("before")), Size: 6, Mimetype: "text/plain"}},
 	}
 	raw, _, err := SerializeManifest(base)
@@ -94,7 +94,7 @@ func TestRepositoryStatusWithoutIncludeTracksOnlyManifestEntries(t *testing.T) {
 func TestRepositoryStatusAppliesIgnoreToManifestEntries(t *testing.T) {
 	workspace := t.TempDir()
 	base := Manifest{
-		Version: Version, SyncPath: "/.sync/latest.json",
+		Version: ManifestVersion, SyncPath: "/.sync/latest.json",
 		Entries: []ManifestEntry{{Path: "secret.txt", Blob: NewIdentifier([]byte("before")), Size: 6, Mimetype: "text/plain"}},
 	}
 	raw, _, err := SerializeManifest(base)
@@ -128,7 +128,7 @@ func TestRepositoryStatusAppliesIgnoreToManifestEntries(t *testing.T) {
 func TestRepositoryStatusRetainsManifestEntriesOutsideInclude(t *testing.T) {
 	workspace := t.TempDir()
 	base := Manifest{
-		Version: Version, SyncPath: "/.sync/latest.json",
+		Version: ManifestVersion, SyncPath: "/.sync/latest.json",
 		Entries: []ManifestEntry{{Path: "tracked.txt", Blob: NewIdentifier([]byte("tracked")), Size: 7, Mimetype: "text/plain"}},
 	}
 	raw, _, err := SerializeManifest(base)

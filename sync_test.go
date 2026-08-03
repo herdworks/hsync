@@ -57,7 +57,7 @@ func TestPrepareRemovesTrackedSymlinkFromNextManifest(t *testing.T) {
 	workspace, build := t.TempDir(), t.TempDir()
 	contents := []byte("tracked")
 	entry := ManifestEntry{Path: "content/page.txt", Blob: NewIdentifier(contents), Size: int64(len(contents)), Mimetype: "text/plain"}
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{entry}}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{entry}}
 	baseRaw, baseID, err := SerializeManifest(base)
 	if err != nil {
 		t.Fatal(err)
@@ -118,7 +118,7 @@ func TestPrepareContinuationUsesExactObservedIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := &SyncConfig{Include: Rules{Paths: []string{"content/**"}}}
-	baseManifest := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}}
+	baseManifest := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}}
 	baseRaw, _, err := SerializeManifest(baseManifest)
 	if err != nil {
 		t.Fatal(err)
@@ -178,7 +178,7 @@ func TestPrepareSkipsLiveEquivalentCandidate(t *testing.T) {
 	}
 	blob := NewIdentifier([]byte("post"))
 	config := &SyncConfig{Include: Rules{Paths: []string{"content/**"}}}
-	live := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/post.md", Blob: blob, Size: 4, Mimetype: "text/markdown; charset=utf-8"}}}
+	live := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/post.md", Blob: blob, Size: 4, Mimetype: "text/markdown; charset=utf-8"}}}
 	liveRaw, liveID, err := SerializeManifest(live)
 	if err != nil {
 		t.Fatal(err)
@@ -228,7 +228,7 @@ func TestPrepareFastForwardsLiveEquivalentCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := &SyncConfig{Include: Rules{Paths: []string{"content/**"}}}
-	baseRaw, baseID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	baseRaw, baseID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -239,7 +239,7 @@ func TestPrepareFastForwardsLiveEquivalentCandidate(t *testing.T) {
 		t.Fatal(err)
 	}
 	blob := NewIdentifier([]byte("post"))
-	live := Manifest{Version: Version, Parent: baseID, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/post.md", Blob: blob, Size: 4, Mimetype: "text/plain; charset=utf-8"}}}
+	live := Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/post.md", Blob: blob, Size: 4, Mimetype: "text/plain; charset=utf-8"}}}
 	liveRaw, liveID, err := SerializeManifest(live)
 	if err != nil {
 		t.Fatal(err)

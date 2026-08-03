@@ -17,7 +17,7 @@ func (reader memoryManifestReader) ReadManifest(_ context.Context, id Identifier
 
 func TestRemoteReadsAndVerifiesManifest(t *testing.T) {
 	t.Parallel()
-	raw, id, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	raw, id, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -79,11 +79,11 @@ func TestRemoteReadsAndVerifiesBlob(t *testing.T) {
 
 func TestReadContinuation(t *testing.T) {
 	t.Parallel()
-	baseRaw, baseID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	baseRaw, baseID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	liveRaw, liveID, err := SerializeManifest(Manifest{Version: Version, Parent: baseID, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	liveRaw, liveID, err := SerializeManifest(Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}

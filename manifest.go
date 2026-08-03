@@ -37,11 +37,12 @@ type ManifestEntry struct {
 	Mimetype string     `json:"mimetype"`
 }
 
-const Version = 1
+// ManifestVersion is the version of the serialized manifest and index format.
+const ManifestVersion = 1
 
 // Validate enforces the v1 manifest invariants.
 func (manifest Manifest) Validate() error {
-	if manifest.Version != Version {
+	if manifest.Version != ManifestVersion {
 		return fmt.Errorf("%w: unsupported manifest version %d", ErrInvalidState, manifest.Version)
 	}
 	if err := validateSyncPath(manifest.SyncPath); err != nil {
@@ -81,7 +82,7 @@ func (entry ManifestEntry) Validate() error {
 // Validate enforces clean and pending index shape, while leaving the ancestry
 // relationship to the manifest reader.
 func (index Index) Validate() error {
-	if index.Version != Version || index.UpdatedAt.IsZero() {
+	if index.Version != ManifestVersion || index.UpdatedAt.IsZero() {
 		return fmt.Errorf("%w: invalid index version or updated_at", ErrInvalidState)
 	}
 	if len(index.History) == 0 || index.History[0] == "" {

@@ -115,7 +115,7 @@ func TestReconcileLocalWinsConflict(t *testing.T) {
 	baseBlob := NewIdentifier([]byte("base"))
 	localBlob := NewIdentifier([]byte("local"))
 	remoteBlob := NewIdentifier([]byte("remote"))
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/post.md", Blob: baseBlob, Size: 4, Mimetype: "text/markdown; charset=utf-8"}}}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/post.md", Blob: baseBlob, Size: 4, Mimetype: "text/markdown; charset=utf-8"}}}
 	live := Manifest{Version: base.Version, SyncPath: base.SyncPath, Entries: append([]ManifestEntry(nil), base.Entries...)}
 	live.Parent = NewIdentifier([]byte("ancestor"))
 	live.Entries[0].Blob = remoteBlob
@@ -144,8 +144,8 @@ func TestReconcileLocalWinsConflict(t *testing.T) {
 func TestReconcileOmitsBlobsAlreadyReferencedByLiveManifest(t *testing.T) {
 	t.Parallel()
 	sharedBlob := NewIdentifier([]byte("shared"))
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/a.md", Blob: sharedBlob, Size: 6, Mimetype: "text/markdown; charset=utf-8"}}}
-	live := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: append([]ManifestEntry(nil), base.Entries...)}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/a.md", Blob: sharedBlob, Size: 6, Mimetype: "text/markdown; charset=utf-8"}}}
+	live := Manifest{Version: ManifestVersion, SyncPath: base.SyncPath, Entries: append([]ManifestEntry(nil), base.Entries...)}
 	workspace := Snapshot{Entries: map[string]ManifestEntry{
 		"content/a.md": {Path: "content/a.md", Blob: sharedBlob, Size: 6, Mimetype: "text/markdown; charset=utf-8"},
 		"content/b.md": {Path: "content/b.md", Blob: sharedBlob, Size: 6, Mimetype: "text/markdown; charset=utf-8"},
@@ -165,9 +165,9 @@ func TestReconcileAdoptsWorkspaceValueFoundInRemoteHistory(t *testing.T) {
 	baseBlob := NewIdentifier([]byte("version: 1\n"))
 	intermediateBlob := NewIdentifier([]byte("version: 2\n"))
 	liveBlob := NewIdentifier([]byte("version: 10\n"))
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "site.yaml", Blob: baseBlob, Size: 11, Mimetype: "application/yaml"}}}
-	intermediate := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: intermediateBlob, Size: 11, Mimetype: "application/yaml"}}}
-	live := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: liveBlob, Size: 12, Mimetype: "application/yaml"}}}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "site.yaml", Blob: baseBlob, Size: 11, Mimetype: "application/yaml"}}}
+	intermediate := Manifest{Version: ManifestVersion, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: intermediateBlob, Size: 11, Mimetype: "application/yaml"}}}
+	live := Manifest{Version: ManifestVersion, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: liveBlob, Size: 12, Mimetype: "application/yaml"}}}
 	workspace := Snapshot{Entries: map[string]ManifestEntry{"site.yaml": {Path: "site.yaml", Blob: intermediateBlob, Size: 11, Mimetype: "application/yaml"}}, Blobs: map[Identifier][]byte{intermediateBlob: []byte("version: 2\n")}}
 
 	changeset, err := (Repository{}).Reconcile(base, NewIdentifier([]byte("live manifest")), Continuation{Revisions: []Manifest{live, intermediate}}, workspace)
@@ -185,9 +185,9 @@ func TestReconcileAdoptsWorkspaceValueFoundInRemoteHistory(t *testing.T) {
 func TestReconcileAdoptsIntermediateDeletion(t *testing.T) {
 	t.Parallel()
 	baseBlob, liveBlob := NewIdentifier([]byte("base")), NewIdentifier([]byte("live"))
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "page.txt", Blob: baseBlob, Size: 4, Mimetype: "text/plain"}}}
-	middle := Manifest{Version: Version, SyncPath: base.SyncPath}
-	live := Manifest{Version: Version, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "page.txt", Blob: liveBlob, Size: 4, Mimetype: "text/plain"}}}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "page.txt", Blob: baseBlob, Size: 4, Mimetype: "text/plain"}}}
+	middle := Manifest{Version: ManifestVersion, SyncPath: base.SyncPath}
+	live := Manifest{Version: ManifestVersion, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "page.txt", Blob: liveBlob, Size: 4, Mimetype: "text/plain"}}}
 	workspace := Snapshot{Entries: map[string]ManifestEntry{}, Blobs: map[Identifier][]byte{}}
 	changeset, err := (Repository{}).Reconcile(base, NewIdentifier([]byte("live manifest")), Continuation{Revisions: []Manifest{live, middle}}, workspace)
 	if err != nil {

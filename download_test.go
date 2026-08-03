@@ -20,11 +20,11 @@ import (
 func TestDownloadDirectAndDiscoveredIndex(t *testing.T) {
 	contents := []byte("hello from sync")
 	blob := NewIdentifier(contents)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "data/message.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain; charset=utf-8"}}})
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "data/message.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain; charset=utf-8"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -88,11 +88,11 @@ func TestDownloadDirectAndDiscoveredIndex(t *testing.T) {
 }
 
 func TestDownloadRootPrefersStandardIndexAndDoesNotFallbackFromExplicitPath(t *testing.T) {
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: DefaultIndexPath, Entries: []ManifestEntry{}})
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: DefaultIndexPath, Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -142,14 +142,14 @@ func TestDownloadFetchesBlobsConcurrently(t *testing.T) {
 	first := []byte("first")
 	second := []byte("second")
 	firstID, secondID := NewIdentifier(first), NewIdentifier(second)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{
 		{Path: "first.txt", Blob: firstID, Size: int64(len(first)), Mimetype: "text/plain"},
 		{Path: "second.txt", Blob: secondID, Size: int64(len(second)), Mimetype: "text/plain"},
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,11 +203,11 @@ func TestDownloadFetchesBlobsConcurrently(t *testing.T) {
 func TestDownloadPublishesIntoExistingEmptyDirectory(t *testing.T) {
 	contents := []byte("published")
 	blob := NewIdentifier(contents)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain"}}})
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,11 +247,11 @@ func TestDownloadPublishesIntoExistingEmptyDirectory(t *testing.T) {
 func TestDownloadFailureLeavesExistingEmptyDirectoryUntouched(t *testing.T) {
 	contents := []byte("incorrect size")
 	blob := NewIdentifier(contents)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents) + 1), Mimetype: "text/plain"}}})
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents) + 1), Mimetype: "text/plain"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -290,7 +290,7 @@ func TestDownloadFailureLeavesExistingEmptyDirectoryUntouched(t *testing.T) {
 
 func TestOpenRepositoryLoadsOnlyLocalManifest(t *testing.T) {
 	directory := t.TempDir()
-	manifestRaw, _, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	manifestRaw, _, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}

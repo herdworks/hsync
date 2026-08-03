@@ -73,7 +73,7 @@ type RepositoryStatus struct {
 // refuses to replace an existing base, because editing or silently replacing
 // that base would make reconciliation history ambiguous.
 func (repository Repository) Initialize(syncPath string) ([]byte, Identifier, error) {
-	manifest := Manifest{Version: Version, SyncPath: syncPath, Entries: []ManifestEntry{}}
+	manifest := Manifest{Version: ManifestVersion, SyncPath: syncPath, Entries: []ManifestEntry{}}
 	raw, id, err := SerializeManifest(manifest)
 	if err != nil {
 		return nil, "", err
@@ -243,7 +243,7 @@ func (repository Repository) Reconcile(base Manifest, liveID Identifier, continu
 	}
 	sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
 
-	manifest := Manifest{Version: Version, Parent: liveID, SyncPath: live.SyncPath, Entries: entries}
+	manifest := Manifest{Version: ManifestVersion, Parent: liveID, SyncPath: live.SyncPath, Entries: entries}
 	if err := manifest.Validate(); err != nil {
 		return Changeset{}, err
 	}

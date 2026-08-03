@@ -190,7 +190,7 @@ func initialChangeset(syncPath string, snapshot Snapshot) (Changeset, error) {
 		entries = append(entries, entry)
 	}
 	sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
-	manifest := Manifest{Version: Version, SyncPath: syncPath, Entries: entries}
+	manifest := Manifest{Version: ManifestVersion, SyncPath: syncPath, Entries: entries}
 	raw, id, err := SerializeManifest(manifest)
 	if err != nil {
 		return Changeset{}, err

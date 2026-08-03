@@ -111,7 +111,7 @@ func TestDeploymentExecutesOrdinaryDeploymentAfterNoopSync(t *testing.T) {
 	workspace := t.TempDir()
 	payload := t.TempDir()
 	writeFile(t, filepath.Join(payload, "index.html"), "page")
-	manifest := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}}
+	manifest := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}}
 	manifestRaw, manifestID, err := SerializeManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -260,7 +260,7 @@ func TestDeploymentFinalizesPreparedSyncAfterProviderSuccess(t *testing.T) {
 		t.Fatal(err)
 	}
 	prepared := *deployment.sync.Changeset
-	deployedIndex, err = json.Marshal(Index{Version: Version, UpdatedAt: fixedNow(), Published: prepared.ManifestID, History: []Identifier{prepared.ManifestID}})
+	deployedIndex, err = json.Marshal(Index{Version: ManifestVersion, UpdatedAt: fixedNow(), Published: prepared.ManifestID, History: []Identifier{prepared.ManifestID}})
 	if err != nil {
 		t.Fatal(err)
 	}

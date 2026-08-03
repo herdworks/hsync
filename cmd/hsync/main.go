@@ -12,7 +12,7 @@ import (
 
 var HSync = &cli.CLI{
 	Name:        "hsync",
-	Version:     "v0.2.0",
+	Version:     string(hsync.LibVersion),
 	Description: "hsync is an HTTP sync tool.",
 	Commands: cli.Commands{
 		downloadCommand(),

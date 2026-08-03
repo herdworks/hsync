@@ -18,6 +18,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * **Changed:** Renamed HyperSync to **hsync**: the module path is now
   `github.com/herdworks/hsync`, the executable is `hsync`, and website
   discovery uses `rel="https://hsync.sh"`.
+* **Changed:** Renamed the serialized manifest/index schema constant from
+  `Version` to `ManifestVersion`, separating it from library release metadata.
 * **Changed:** Local bases are stored at `.hsync/manifest.json`, while external
   configuration defines synchronization policy. Root endpoints default to
   `/.hsync/index.json`; custom index paths remain supported.

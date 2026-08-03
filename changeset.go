@@ -111,7 +111,7 @@ func completeChangeset(changeset Changeset, observedIndexRaw []byte, now time.Ti
 
 func changesetIndexes(changeset Identifier, observedRaw []byte, now time.Time) (Index, Index, error) {
 	if len(observedRaw) == 0 {
-		return Index{Version: Version, UpdatedAt: now, Pending: changeset, History: []Identifier{changeset}}, Index{Version: Version, UpdatedAt: now, Published: changeset, History: []Identifier{changeset}}, nil
+		return Index{Version: ManifestVersion, UpdatedAt: now, Pending: changeset, History: []Identifier{changeset}}, Index{Version: ManifestVersion, UpdatedAt: now, Published: changeset, History: []Identifier{changeset}}, nil
 	}
 	observed, err := ParseIndex(observedRaw)
 	if err != nil {
@@ -121,7 +121,7 @@ func changesetIndexes(changeset Identifier, observedRaw []byte, now time.Time) (
 		return Index{}, Index{}, observed.PendingError(now)
 	}
 	history := append([]Identifier{changeset}, observed.History...)
-	return Index{Version: Version, UpdatedAt: now, Published: observed.Published, Pending: changeset, History: history}, Index{Version: Version, UpdatedAt: now, Published: changeset, History: history}, nil
+	return Index{Version: ManifestVersion, UpdatedAt: now, Published: observed.Published, Pending: changeset, History: history}, Index{Version: ManifestVersion, UpdatedAt: now, Published: changeset, History: history}, nil
 }
 
 func deploymentInstructions(syncPath string, hasExpected bool) ([]byte, error) {

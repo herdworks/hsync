@@ -17,17 +17,17 @@ import (
 func TestPullUsesConcurrentDownloadProgress(t *testing.T) {
 	checkout := t.TempDir()
 	before, after := []byte("before"), []byte("after")
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
 	baseRaw, baseID, err := SerializeManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := Manifest{Version: Version, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
+	live := Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
 	liveRaw, liveID, err := SerializeManifest(live)
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -129,13 +129,13 @@ func TestPullLogsDeletedFiles(t *testing.T) {
 func TestPullAdvancesIntermediateWorkspaceValueToLive(t *testing.T) {
 	checkout := t.TempDir()
 	baseBytes, oldBytes, liveBytes := []byte("version: 1\n"), []byte("version: 2\n"), []byte("version: 10\n")
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(baseBytes), Size: int64(len(baseBytes)), Mimetype: "application/yaml"}}}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(baseBytes), Size: int64(len(baseBytes)), Mimetype: "application/yaml"}}}
 	baseRaw, baseID, _ := SerializeManifest(base)
-	middle := Manifest{Version: Version, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(oldBytes), Size: int64(len(oldBytes)), Mimetype: "application/yaml"}}}
+	middle := Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(oldBytes), Size: int64(len(oldBytes)), Mimetype: "application/yaml"}}}
 	middleRaw, middleID, _ := SerializeManifest(middle)
-	live := Manifest{Version: Version, Parent: middleID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(liveBytes), Size: int64(len(liveBytes)), Mimetype: "application/yaml"}}}
+	live := Manifest{Version: ManifestVersion, Parent: middleID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(liveBytes), Size: int64(len(liveBytes)), Mimetype: "application/yaml"}}}
 	liveRaw, liveID, _ := SerializeManifest(live)
-	indexRaw, _ := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, middleID, baseID}})
+	indexRaw, _ := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, middleID, baseID}})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
@@ -175,17 +175,17 @@ func TestPullAdvancesIntermediateWorkspaceValueToLive(t *testing.T) {
 func TestPullFailureDoesNotAdvanceLocalBase(t *testing.T) {
 	checkout := t.TempDir()
 	before, after := []byte("before"), []byte("after")
-	base := Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
+	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
 	baseRaw, baseID, err := SerializeManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := Manifest{Version: Version, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
+	live := Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
 	liveRaw, liveID, err := SerializeManifest(live)
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: Version, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
 	if err != nil {
 		t.Fatal(err)
 	}

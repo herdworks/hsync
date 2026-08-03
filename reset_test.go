@@ -152,7 +152,7 @@ func TestRepositoryResetNoopDoesNotReadRemote(t *testing.T) {
 
 func writeResetManifest(t *testing.T, root string, entries []ManifestEntry) Repository {
 	t.Helper()
-	raw, _, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: entries})
+	raw, _, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: entries})
 	if err != nil {
 		t.Fatal(err)
 	}

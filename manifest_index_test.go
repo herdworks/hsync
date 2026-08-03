@@ -9,7 +9,7 @@ import (
 func TestIndexPendingError(t *testing.T) {
 	t.Parallel()
 	id := NewIdentifier([]byte("manifest"))
-	index := Index{Version: Version, UpdatedAt: time.Now(), Published: id, Pending: id, History: []Identifier{id, id}}
+	index := Index{Version: ManifestVersion, UpdatedAt: time.Now(), Published: id, Pending: id, History: []Identifier{id, id}}
 	if !errors.Is(index.PendingError(time.Now()), ErrDeploymentInProgress) {
 		t.Fatal("pending deployment was not blocked")
 	}

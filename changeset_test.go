@@ -12,7 +12,7 @@ func TestChangesetApplyInitializesPendingIndex(t *testing.T) {
 	t.Parallel()
 	build := t.TempDir()
 	blob := []byte("post")
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.hsync/revision.json", Entries: []ManifestEntry{}})
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.hsync/revision.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func TestChangesetApplyRetainsObservedIndexBytes(t *testing.T) {
 	build := t.TempDir()
 	old := NewIdentifier([]byte("old"))
 	observed := []byte(`{"version":1,"updated_at":"2026-07-30T12:00:00Z","published":"` + old + `","history":["` + old + `"]}`)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}

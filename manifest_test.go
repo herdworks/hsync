@@ -8,7 +8,7 @@ import (
 func TestSerializeManifestUsesExactBytes(t *testing.T) {
 	t.Parallel()
 
-	manifest := Manifest{Version: Version, SyncPath: "/.hsync/revision.json", Entries: []ManifestEntry{}}
+	manifest := Manifest{Version: ManifestVersion, SyncPath: "/.hsync/revision.json", Entries: []ManifestEntry{}}
 	raw, id, err := SerializeManifest(manifest)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestManifestValidationDoesNotUseExternalSyncRules(t *testing.T) {
 	t.Parallel()
 
 	manifest := Manifest{
-		Version: Version, SyncPath: "/.sync/latest.json",
+		Version: ManifestVersion, SyncPath: "/.sync/latest.json",
 		Entries: []ManifestEntry{{Path: "data/site.yaml", Blob: NewIdentifier([]byte("site")), Size: 4, Mimetype: "application/yaml"}},
 	}
 	if err := manifest.Validate(); err != nil {

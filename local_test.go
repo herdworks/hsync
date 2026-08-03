@@ -37,7 +37,7 @@ func TestFinalizePreservesCandidateBytes(t *testing.T) {
 	workspace := t.TempDir()
 	manifestPath := filepath.Join(workspace, LocalManifestPath)
 	repository := Repository{Root: workspace}
-	candidateRaw, candidateID, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	candidateRaw, candidateID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestFinalizePreservesCandidateBytes(t *testing.T) {
 func TestFinalizeRejectsDifferentPublishedCandidate(t *testing.T) {
 	t.Parallel()
 	repository := Repository{}
-	raw, id, err := SerializeManifest(Manifest{Version: Version, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	raw, id, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
