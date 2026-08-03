@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.2.0 (2026-08-03)
+
 * **Added:** `Deployment`, an hsync-enabled HyperProviders deployment that
   prepares synchronization, delegates publication, and advances the local base
   only after a successful deployment.
