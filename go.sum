@@ -78,8 +78,8 @@ github.com/herdworks/hyperfiles-go v0.1.0 h1:ooyw2X9Zf07j1+DNpbii7wtONl1XPE2b0vd
 github.com/herdworks/hyperfiles-go v0.1.0/go.mod h1:LIkN6Ro8w6LKx2oNUAj25+dOpn+AW3q3SXV/DrvUDqM=
 github.com/herdworks/hypergraph-go v0.23.1 h1:mT5PZDujeK8BGXXy8XYBIusWVXMT9fdp2+9abqkF4tQ=
 github.com/herdworks/hypergraph-go v0.23.1/go.mod h1:yIgqNsfnxxoON3XqAAg+u3SG7SKBOu+7iNerZby5KhI=
-github.com/herdworks/hyperproviders-go v0.25.1 h1:MBrQSVQQnxvxHRw44JFmNHHsyo5a+kjG8tGCCXH9K34=
-github.com/herdworks/hyperproviders-go v0.25.1/go.mod h1:d9RcZL9ifBrHpTzv/8LxRkxWQ5lVmR1zls2p2HS7w1s=
+github.com/herdworks/hyperproviders-go v0.26.0 h1:fAIK4RyF8VbyjWh4CDrBlT5U97gNtnzftH93Nt1NBGE=
+github.com/herdworks/hyperproviders-go v0.26.0/go.mod h1:d9RcZL9ifBrHpTzv/8LxRkxWQ5lVmR1zls2p2HS7w1s=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99 h1:BQSFePA1RWJOlocH6Fxy8MmwDt+yVQYULKfN0RoTN8A=
 github.com/jbenet/go-context v0.0.0-20150711004518-d14ea06fba99/go.mod h1:1lJo3i6rXxKeerYnT8Nvf0QmHCRC1n8sfWVwXF2Frvo=
 github.com/kevinburke/ssh_config v1.2.0 h1:x584FjTGwHzMwvHx18PXxbBVzfnxogHaAReU4gf13a4=

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.3.1 (2026-08-03)
+
+* Updated `github.com/herdworks/hyperproviders-go` to v0.26.0
+
 ## v0.3.0 (2026-08-03)
 
 * **Added:** JSON Schema metadata for `SyncConfig` and `Rules`, including a
