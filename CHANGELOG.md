@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.3.0 (2026-08-03)
+
 * **Added:** JSON Schema metadata for `SyncConfig` and `Rules`, including a
   named `sync` schema for website configuration tooling.
 
