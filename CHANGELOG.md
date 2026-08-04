@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* **Added:** JSON Schema metadata for `SyncConfig` and `Rules`, including a
+  named `sync` schema for website configuration tooling.
+
 ## v0.2.0 (2026-08-03)
 
 * **Added:** `Deployment`, an hsync-enabled HyperProviders deployment that

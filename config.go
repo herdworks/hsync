@@ -29,7 +29,7 @@ type RepositoryConfig struct {
 // immutable manifest so changing it becomes an ordinary synchronized file
 // change rather than a manifest migration.
 type SyncConfig struct {
-	Remote       string `json:"remote,omitempty" yaml:"remote,omitempty"`
+	Remote       string `json:"remote,omitempty" yaml:"remote,omitempty" jsonschema:"required,format=uri,pattern=^https://[^/?#]+,description=An absolute HTTPS URL with a host. Queries fragments and escaped paths are not supported."`
 	Include      Rules  `json:"include" yaml:"include"`
 	Ignore       Rules  `json:"ignore" yaml:"ignore"`
 	MaxFileSize  string `json:"max_file_size,omitempty" yaml:"max_file_size,omitempty"`
@@ -40,6 +40,15 @@ type SyncConfig struct {
 type Rules struct {
 	Paths     []string `json:"paths,omitempty" yaml:"paths,omitempty"`
 	Mimetypes []string `json:"mimetypes,omitempty" yaml:"mimetypes,omitempty"`
+}
+
+// SyncPolicy is the evaluated file-selection policy for one local snapshot.
+type SyncPolicy struct {
+	includePaths PathExpressions
+	includeTypes []string
+	ignorePaths  PathExpressions
+	ignoreTypes  []string
+	maxBytes     int64
 }
 
 // PathExpression is the deliberately small, gitignore-like path language
@@ -53,15 +62,6 @@ type PathExpression struct {
 }
 
 type PathExpressions []PathExpression
-
-// SyncPolicy is the evaluated file-selection policy for one local snapshot.
-type SyncPolicy struct {
-	includePaths PathExpressions
-	includeTypes []string
-	ignorePaths  PathExpressions
-	ignoreTypes  []string
-	maxBytes     int64
-}
 
 const DefaultConfigPath = "hsync.yaml"
 
@@ -160,6 +160,18 @@ func (config SyncConfig) Policy(reserved ...string) (SyncPolicy, error) {
 	}, nil
 }
 
+func (SyncConfig) JSONSchemaTitle() string {
+	return "HyperSync configuration"
+}
+func (SyncConfig) JSONSchemaName() string { return "sync" }
+func (SyncConfig) JSONSchemaSummary() string {
+	return "Synchronization settings for a website source configuration."
+}
+
+func (SyncConfig) JSONSchemaDescription() string {
+	return "Synchronization settings for a website source configuration."
+}
+
 // Allows reports whether entry remains after the ignore and size rules are
 // applied. These rules apply to both manifest entries and newly scanned files.
 func (policy SyncPolicy) Allows(entry ManifestEntry) bool {
@@ -194,6 +206,16 @@ func (policy SyncPolicy) Includes(entry ManifestEntry) bool {
 // ScanningEnabled reports whether config can discover files that are not already tracked.
 func (policy SyncPolicy) ScanningEnabled() bool {
 	return policy.includePaths.hasPositive() || len(policy.includeTypes) != 0
+}
+
+func (Rules) JSONSchemaTitle() string {
+	return "HyperSync rules"
+}
+func (Rules) JSONSchemaName() string    { return "sync-rules" }
+func (Rules) JSONSchemaSummary() string { return "Optional synchronization path and MIME type rules." }
+
+func (Rules) JSONSchemaDescription() string {
+	return "Optional path and MIME type rules for synchronized files."
 }
 
 func (expressions PathExpressions) match(value string) (bool, bool) {
