@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* Added public `ParsePathExpression` and `PathExpression.Matches` APIs so
+  HyperTexting feed selectors use the same gitignore-like path matching as
+  hsync configuration.
+
 ## v0.3.1 (2026-08-03)
 
 * Updated `github.com/herdworks/hyperproviders-go` to v0.26.0

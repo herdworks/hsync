@@ -239,6 +239,17 @@ func (expressions PathExpressions) hasPositive() bool {
 	return false
 }
 
+// ParsePathExpression compiles one gitignore-like path expression for callers
+// that need the same public path language as hsync configuration.
+func ParsePathExpression(value string) (PathExpression, error) {
+	return parsePathExpression(value, false)
+}
+
+// Matches reports whether this expression matches a slash-separated path.
+func (expression PathExpression) Matches(value string) bool {
+	return expression.matches(strings.Trim(filepath.ToSlash(value), "/"))
+}
+
 func (expression PathExpression) matches(value string) bool {
 	if expression.directory {
 		parts := strings.Split(value, "/")

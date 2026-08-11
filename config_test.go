@@ -249,3 +249,29 @@ func TestConfiguredPathExpressionsUseGitignoreLikeMatching(t *testing.T) {
 		}
 	}
 }
+
+func TestParsePathExpressionMatchesPublicPaths(t *testing.T) {
+	expression, err := ParsePathExpression("/blog/**")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !expression.Matches("/blog/hello/") {
+		t.Fatal("rooted expression did not match canonical path")
+	}
+	if expression.Matches("/docs/hello/") {
+		t.Fatal("rooted expression matched unrelated path")
+	}
+}
+
+func TestParsePathExpressionMatchesCanonicalPagePath(t *testing.T) {
+	expression, err := ParsePathExpression("/blog")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !expression.Matches("/blog/") {
+		t.Fatal("exact rooted expression did not match canonical page path")
+	}
+	if expression.Matches("/blog/hello/") {
+		t.Fatal("exact rooted expression matched a descendant page")
+	}
+}
