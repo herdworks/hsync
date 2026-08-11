@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.3.2 (2026-08-11)
+
 * Added public `ParsePathExpression` and `PathExpression.Matches` APIs so
   HyperTexting feed selectors use the same gitignore-like path matching as
   hsync configuration.
