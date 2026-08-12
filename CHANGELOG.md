@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.5.1 (2026-08-12)
+
 * Improved reusable CLI command validation so host-remixed command, option,
   and environment-variable names appear correctly in diagnostics.
 * Added `-p` as a short form of `hsync push --providers`.
