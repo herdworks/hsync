@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	hyperproviders "github.com/herdworks/hyperproviders-go"
+	"github.com/herdworks/htup"
 )
 
 const facadeProviderKind = "hsync-deployment-test"
@@ -20,7 +20,7 @@ const facadeProviderKind = "hsync-deployment-test"
 var facadeEngine = &deploymentTestEngine{}
 
 func init() {
-	hyperproviders.RegisterEngine(facadeProviderKind, facadeEngine)
+	htup.RegisterEngine(facadeProviderKind, facadeEngine)
 }
 
 type deploymentTestEngine struct {
@@ -28,14 +28,14 @@ type deploymentTestEngine struct {
 	calls int
 }
 
-func (*deploymentTestEngine) Validate(*hyperproviders.HostingProvider) error { return nil }
-func (*deploymentTestEngine) Ready(context.Context, hyperproviders.SecretsProviders, *hyperproviders.HostingProvider) error {
+func (*deploymentTestEngine) Validate(*htup.HostingProvider) error { return nil }
+func (*deploymentTestEngine) Ready(context.Context, htup.SecretsProviders, *htup.HostingProvider) error {
 	return nil
 }
-func (*deploymentTestEngine) ValidateOperation(*hyperproviders.HostingProvider, hyperproviders.DeploymentOperation) error {
+func (*deploymentTestEngine) ValidateOperation(*htup.HostingProvider, htup.DeploymentOperation) error {
 	return nil
 }
-func (engine *deploymentTestEngine) PerformOperation(context.Context, hyperproviders.SecretsProviders, hyperproviders.DeploymentOperation, io.Writer) error {
+func (engine *deploymentTestEngine) PerformOperation(context.Context, htup.SecretsProviders, htup.DeploymentOperation, io.Writer) error {
 	engine.calls++
 	return engine.err
 }
@@ -45,8 +45,8 @@ func resetFacadeEngine() {
 	facadeEngine.calls = 0
 }
 
-func facadeProvider() hyperproviders.HostingProviders {
-	return hyperproviders.HostingProviders{"test": {Kind: facadeProviderKind, Endpoint: "https://provider.example"}}
+func facadeProvider() htup.HostingProviders {
+	return htup.HostingProviders{"test": {Kind: facadeProviderKind, Endpoint: "https://provider.example"}}
 }
 
 func writeDeploymentConfig(t *testing.T, root, remote string, include []string) string {
@@ -79,7 +79,7 @@ func TestDeploymentPrepareBuildsProviderPlanAfterSync(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
 	configPath := writeDeploymentConfig(t, workspace, server.URL, []string{"content/**"})
-	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: hyperproviders.IncrementalDeployment, Now: fixedNow}
+	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: htup.IncrementalDeployment, Now: fixedNow}
 	if err := deployment.Prepare(context.Background(), io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -136,11 +136,11 @@ func TestDeploymentExecutesOrdinaryDeploymentAfterNoopSync(t *testing.T) {
 	}))
 	defer server.Close()
 	configPath := writeDeploymentConfig(t, workspace, server.URL, []string{"content/**"})
-	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: hyperproviders.CompleteDeployment, Now: fixedNow}
+	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: htup.CompleteDeployment, Now: fixedNow}
 	if err := deployment.Execute(context.Background(), nil, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if facadeEngine.calls != 1 || deployment.Status() != hyperproviders.DeploymentSucceeded {
+	if facadeEngine.calls != 1 || deployment.Status() != htup.DeploymentSucceeded {
 		t.Fatalf("calls = %d, deployment status = %q", facadeEngine.calls, deployment.Status())
 	}
 	if deployment.sync.Status.Status != StatusNoop {
@@ -161,11 +161,11 @@ func TestDeploymentUsesOneConfigSnapshotForSyncAndProviders(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte("this is no longer valid configuration"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deployment := &Deployment{ConfigPath: configPath, ConfigBytes: configBytes, PayloadPath: payload, Providers: facadeProvider(), Kind: hyperproviders.IncrementalDeployment, Now: fixedNow}
+	deployment := &Deployment{ConfigPath: configPath, ConfigBytes: configBytes, PayloadPath: payload, Providers: facadeProvider(), Kind: htup.IncrementalDeployment, Now: fixedNow}
 	if err := deployment.Prepare(context.Background(), io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if deployment.sync == nil || deployment.Status() != hyperproviders.DeploymentReady {
+	if deployment.sync == nil || deployment.Status() != htup.DeploymentReady {
 		t.Fatalf("sync = %#v, deployment status = %q", deployment.sync, deployment.Status())
 	}
 }
@@ -179,11 +179,11 @@ func TestDeploymentUsesEnvironmentFromConfig(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Environment: "production", Kind: hyperproviders.CompleteDeployment}
+	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Environment: "production", Kind: htup.CompleteDeployment}
 	if err := deployment.Execute(context.Background(), nil, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if facadeEngine.calls != 1 || deployment.Status() != hyperproviders.DeploymentSucceeded {
+	if facadeEngine.calls != 1 || deployment.Status() != htup.DeploymentSucceeded {
 		t.Fatalf("calls = %d, deployment status = %q", facadeEngine.calls, deployment.Status())
 	}
 }
@@ -197,7 +197,7 @@ func TestDeploymentUsesHsyncEnvironmentByDefault(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Kind: hyperproviders.CompleteDeployment}
+	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Kind: htup.CompleteDeployment}
 	if err := deployment.Execute(context.Background(), nil, io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestDeploymentFailureDoesNotFinalizePreparedSync(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
 	configPath := writeDeploymentConfig(t, workspace, server.URL, []string{"content/**"})
-	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: hyperproviders.IncrementalDeployment, Now: fixedNow}
+	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: htup.IncrementalDeployment, Now: fixedNow}
 	if err := deployment.Execute(context.Background(), nil, io.Discard); !errors.Is(err, facadeEngine.err) {
 		t.Fatalf("Execute() error = %v", err)
 	}
@@ -255,7 +255,7 @@ func TestDeploymentFinalizesPreparedSyncAfterProviderSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 	configPath := writeDeploymentConfig(t, workspace, server.URL, []string{"content/**"})
-	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: hyperproviders.IncrementalDeployment, Now: fixedNow}
+	deployment := &Deployment{ConfigPath: configPath, PayloadPath: payload, Providers: facadeProvider(), Kind: htup.IncrementalDeployment, Now: fixedNow}
 	if err := deployment.Prepare(context.Background(), io.Discard); err != nil {
 		t.Fatal(err)
 	}
@@ -267,7 +267,7 @@ func TestDeploymentFinalizesPreparedSyncAfterProviderSuccess(t *testing.T) {
 	if err := deployment.Execute(context.Background(), nil, io.Discard); err != nil {
 		t.Fatal(err)
 	}
-	if facadeEngine.calls != 1 || deployment.Status() != hyperproviders.DeploymentSucceeded {
+	if facadeEngine.calls != 1 || deployment.Status() != htup.DeploymentSucceeded {
 		t.Fatalf("calls = %d, deployment status = %q", facadeEngine.calls, deployment.Status())
 	}
 	got, err := os.ReadFile(filepath.Join(workspace, LocalManifestPath))

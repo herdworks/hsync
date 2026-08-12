@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/herdworks/hyperfiles-go/mimetypes"
+	"github.com/herdworks/hypermedia/mimetypes"
 )
 
 // Repository identifies the managed source tree and its one persistent local

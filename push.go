@@ -8,17 +8,17 @@ import (
 	"os"
 	"path/filepath"
 
-	hyperproviders "github.com/herdworks/hyperproviders-go"
-	envsecrets "github.com/herdworks/hyperproviders-go/providers/env"
-	_ "github.com/herdworks/hyperproviders-go/providers/git"
-	_ "github.com/herdworks/hyperproviders-go/providers/s3"
+	"github.com/herdworks/htup"
+	envsecrets "github.com/herdworks/htup/providers/env"
+	_ "github.com/herdworks/htup/providers/git"
+	_ "github.com/herdworks/htup/providers/s3"
 )
 
 // PushOptions selects providers from a generic deployment configuration.
 type PushOptions struct {
 	ConfigPath, Environment string
 	Providers               []string
-	Secrets                 hyperproviders.SecretsProviders
+	Secrets                 htup.SecretsProviders
 }
 
 // Push reconciles and publishes the repository containing its configuration
@@ -43,7 +43,7 @@ func Push(ctx context.Context, options PushOptions) error {
 	if err := preflightInitialPush(ctx, config.Directory(), *config.Sync); err != nil {
 		return err
 	}
-	var providers hyperproviders.HostingProviders
+	var providers htup.HostingProviders
 	if len(options.Providers) != 0 {
 		providers, err = config.Providers.Select(options.Providers)
 		if err != nil {
@@ -52,7 +52,7 @@ func Push(ctx context.Context, options PushOptions) error {
 	}
 	secrets := options.Secrets
 	if secrets == nil {
-		secrets = hyperproviders.SecretsProviders{envsecrets.New()}
+		secrets = htup.SecretsProviders{envsecrets.New()}
 	}
 	environment := options.Environment
 	if environment == "" && len(providers) == 0 {
@@ -63,7 +63,7 @@ func Push(ctx context.Context, options PushOptions) error {
 		return err
 	}
 	defer os.RemoveAll(payload)
-	return (&Deployment{ConfigPath: config.Path, ConfigBytes: configBytes, PayloadPath: payload, Providers: providers, Environment: environment, Kind: hyperproviders.IncrementalDeployment}).Execute(ctx, secrets, nil)
+	return (&Deployment{ConfigPath: config.Path, ConfigBytes: configBytes, PayloadPath: payload, Providers: providers, Environment: environment, Kind: htup.IncrementalDeployment}).Execute(ctx, secrets, nil)
 }
 
 // preflightInitialPush refuses to create even temporary local state for a

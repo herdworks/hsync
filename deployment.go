@@ -8,22 +8,22 @@ import (
 	"net/url"
 	"time"
 
-	hyperproviders "github.com/herdworks/hyperproviders-go"
+	"github.com/herdworks/htup"
 )
 
 // Deployment composes optional synchronization preparation and finalization
-// with one declarative HyperProviders deployment.
+// with one declarative htup deployment.
 type Deployment struct {
 	ConfigPath  string
 	ConfigBytes []byte
 	PayloadPath string
-	Providers   hyperproviders.HostingProviders
+	Providers   htup.HostingProviders
 	Environment string
-	Kind        hyperproviders.DeploymentKind
+	Kind        htup.DeploymentKind
 	Client      *http.Client
 	Now         func() time.Time
 
-	provider *hyperproviders.Deployment
+	provider *htup.Deployment
 	sync     *Sync
 }
 
@@ -53,7 +53,7 @@ func (deployment *Deployment) Prepare(ctx context.Context, writer io.Writer) err
 	if environment == "" && len(deployment.Providers) == 0 {
 		environment = DefaultEnvironment
 	}
-	provider := &hyperproviders.Deployment{ConfigPath: deployment.ConfigPath, ConfigBytes: configBytes, PayloadPath: deployment.PayloadPath, Providers: deployment.Providers, Environment: environment, Kind: deployment.Kind}
+	provider := &htup.Deployment{ConfigPath: deployment.ConfigPath, ConfigBytes: configBytes, PayloadPath: deployment.PayloadPath, Providers: deployment.Providers, Environment: environment, Kind: deployment.Kind}
 	if err := provider.Prepare(ctx, writer); err != nil {
 		return err
 	}
@@ -64,7 +64,7 @@ func (deployment *Deployment) Prepare(ctx context.Context, writer io.Writer) err
 
 // Execute performs one deployment attempt and finalizes a prepared sync only
 // after every provider operation has succeeded.
-func (deployment *Deployment) Execute(ctx context.Context, secrets hyperproviders.SecretsProviders, writer io.Writer) error {
+func (deployment *Deployment) Execute(ctx context.Context, secrets htup.SecretsProviders, writer io.Writer) error {
 	if deployment == nil {
 		return fmt.Errorf("deployment is required")
 	}
@@ -85,37 +85,37 @@ func (deployment *Deployment) Execute(ctx context.Context, secrets hyperprovider
 }
 
 // Instructions returns a snapshot of the nested provider declarations.
-func (deployment *Deployment) Instructions() hyperproviders.DeploymentInstructions {
+func (deployment *Deployment) Instructions() htup.DeploymentInstructions {
 	if deployment == nil || deployment.provider == nil {
-		return hyperproviders.DeploymentInstructions{}
+		return htup.DeploymentInstructions{}
 	}
 	return deployment.provider.Instructions()
 }
 
 // Plan returns a snapshot of the nested provider plan.
-func (deployment *Deployment) Plan() hyperproviders.DeploymentPlan {
+func (deployment *Deployment) Plan() htup.DeploymentPlan {
 	if deployment == nil || deployment.provider == nil {
-		return hyperproviders.DeploymentPlan{}
+		return htup.DeploymentPlan{}
 	}
 	return deployment.provider.Plan()
 }
 
 // Status reports the nested provider status.
-func (deployment *Deployment) Status() hyperproviders.DeploymentStatus {
+func (deployment *Deployment) Status() htup.DeploymentStatus {
 	if deployment == nil || deployment.provider == nil {
-		return hyperproviders.DeploymentPending
+		return htup.DeploymentPending
 	}
 	return deployment.provider.Status()
 }
 
 func (deployment *Deployment) configSnapshot() ([]byte, error) {
 	if deployment.ConfigBytes != nil {
-		if err := hyperproviders.ValidateDeploymentConfigPath(deployment.ConfigPath); err != nil {
+		if err := htup.ValidateDeploymentConfigPath(deployment.ConfigPath); err != nil {
 			return nil, err
 		}
 		return append([]byte(nil), deployment.ConfigBytes...), nil
 	}
-	return hyperproviders.ReadDeploymentConfig(deployment.ConfigPath)
+	return htup.ReadDeploymentConfig(deployment.ConfigPath)
 }
 
 func (deployment *Deployment) now() time.Time {
@@ -139,7 +139,7 @@ func SyncFromConfig(ctx context.Context, configPath string, configBytes []byte, 
 	if err := config.Sync.Validate(); err != nil {
 		return nil, err
 	}
-	if err := hyperproviders.ValidateDeploymentPayloadPath(configPath, payloadPath); err != nil {
+	if err := htup.ValidateDeploymentPayloadPath(configPath, payloadPath); err != nil {
 		return nil, err
 	}
 	root := config.Directory()

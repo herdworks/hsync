@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	hypergraph "github.com/herdworks/hypergraph-go/types"
+	"github.com/herdworks/hq"
 	"golang.org/x/sync/errgroup"
 )
 
@@ -395,7 +395,7 @@ func resolvePublished(ctx context.Context, source *url.URL, client *http.Client)
 	if response.StatusCode < 200 || response.StatusCode > 299 {
 		return nil, Remote{}, Index{}, nil, Manifest{}, fmt.Errorf("read discovery document: HTTP %s", response.Status)
 	}
-	links, err := hypergraph.DiscoverSyncEndpoints(source.String(), response.Body)
+	links, err := hq.DiscoverSyncEndpoints(source.String(), response.Body)
 	if err != nil {
 		return nil, Remote{}, Index{}, nil, Manifest{}, err
 	}

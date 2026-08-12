@@ -12,17 +12,17 @@ import (
 
 	"gopkg.in/yaml.v3"
 
-	"github.com/herdworks/hyperfiles-go/mimetypes"
-	hyperproviders "github.com/herdworks/hyperproviders-go"
+	"github.com/herdworks/htup"
+	"github.com/herdworks/hypermedia/mimetypes"
 )
 
 // RepositoryConfig is the hsync-relevant subset of a repository-root project
 // configuration. Unrelated top-level keys are ignored.
 type RepositoryConfig struct {
-	Path         string                                 `json:"-" yaml:"-"`
-	Providers    hyperproviders.HostingProviders        `json:"providers" yaml:"providers"`
-	Environments map[string]*hyperproviders.Environment `json:"environments,omitempty" yaml:"environments,omitempty"`
-	Sync         *SyncConfig                            `json:"sync,omitempty" yaml:"sync,omitempty"`
+	Path         string                       `json:"-" yaml:"-"`
+	Providers    htup.HostingProviders        `json:"providers" yaml:"providers"`
+	Environments map[string]*htup.Environment `json:"environments,omitempty" yaml:"environments,omitempty"`
+	Sync         *SyncConfig                  `json:"sync,omitempty" yaml:"sync,omitempty"`
 }
 
 // SyncConfig configures local synchronization policy. It is external to the
@@ -350,7 +350,7 @@ func InitializeConfig(filename, remote string) error {
 		}
 		return err
 	}
-	config := RepositoryConfig{Providers: hyperproviders.HostingProviders{}, Environments: map[string]*hyperproviders.Environment{}, Sync: &SyncConfig{Remote: remote}}
+	config := RepositoryConfig{Providers: htup.HostingProviders{}, Environments: map[string]*htup.Environment{}, Sync: &SyncConfig{Remote: remote}}
 	if err := config.Sync.Validate(); err != nil {
 		return err
 	}

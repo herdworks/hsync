@@ -2,14 +2,18 @@ module github.com/herdworks/hsync
 
 go 1.26
 
+// first-party dependencies
 require (
-	github.com/herdworks/cli-go v0.1.0
-	github.com/herdworks/hyperfiles-go v0.1.0
-	github.com/herdworks/hypergraph-go v0.23.1
-	github.com/herdworks/hyperproviders-go v0.26.0
-	gopkg.in/yaml.v3 v3.0.1
+	github.com/herdworks/clif v0.2.0
+	github.com/herdworks/hq v0.24.0
+	github.com/herdworks/htup v0.27.1
+	github.com/herdworks/hypermedia v0.2.0
 )
 
+// direct dependencies
+require gopkg.in/yaml.v3 v3.0.1
+
+// transitive dependencies
 require (
 	dario.cat/mergo v1.0.0 // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect

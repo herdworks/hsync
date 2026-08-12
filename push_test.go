@@ -12,15 +12,15 @@ import (
 	"sort"
 	"testing"
 
-	hyperproviders "github.com/herdworks/hyperproviders-go"
+	"github.com/herdworks/htup"
 )
 
 type unavailableSecrets struct{}
 
 func (unavailableSecrets) Name() string { return "unavailable" }
 
-func (unavailableSecrets) Resolve(context.Context, string) (hyperproviders.SecretValue, error) {
-	return nil, fmt.Errorf("%w", hyperproviders.ErrSecretNotFound)
+func (unavailableSecrets) Resolve(context.Context, string) (htup.SecretValue, error) {
+	return nil, fmt.Errorf("%w", htup.ErrSecretNotFound)
 }
 
 const pushPayloadProviderKind = "hsync-push-payload-test"
@@ -33,18 +33,18 @@ type capturingPushEngine struct {
 	err   error
 }
 
-func init() { hyperproviders.RegisterEngine(pushPayloadProviderKind, pushPayloadEngine) }
+func init() { htup.RegisterEngine(pushPayloadProviderKind, pushPayloadEngine) }
 
-func (*capturingPushEngine) Validate(*hyperproviders.HostingProvider) error { return nil }
-func (*capturingPushEngine) Ready(context.Context, hyperproviders.SecretsProviders, *hyperproviders.HostingProvider) error {
+func (*capturingPushEngine) Validate(*htup.HostingProvider) error { return nil }
+func (*capturingPushEngine) Ready(context.Context, htup.SecretsProviders, *htup.HostingProvider) error {
 	return nil
 }
-func (*capturingPushEngine) ValidateOperation(*hyperproviders.HostingProvider, hyperproviders.DeploymentOperation) error {
+func (*capturingPushEngine) ValidateOperation(*htup.HostingProvider, htup.DeploymentOperation) error {
 	return nil
 }
-func (engine *capturingPushEngine) PerformOperation(_ context.Context, _ hyperproviders.SecretsProviders, operation hyperproviders.DeploymentOperation, _ io.Writer) error {
+func (engine *capturingPushEngine) PerformOperation(_ context.Context, _ htup.SecretsProviders, operation htup.DeploymentOperation, _ io.Writer) error {
 	engine.paths = nil
-	for _, file := range append(append([]*hyperproviders.File(nil), operation.Bulk...), operation.Enqueued...) {
+	for _, file := range append(append([]*htup.File(nil), operation.Bulk...), operation.Enqueued...) {
 		engine.paths = append(engine.paths, file.RelPath())
 		if file.RelPath() == ".hsync/index.json" {
 			contents, err := os.ReadFile(file.LocalPath())
@@ -95,7 +95,7 @@ func TestPushConfigRegistersHyperctlHostingEngines(t *testing.T) {
 			t.Fatalf("provider %q validation = %v", name, err)
 		}
 	}
-	if err := loaded.Providers["storage"].Ready(context.Background(), hyperproviders.SecretsProviders{unavailableSecrets{}}); !errors.Is(err, hyperproviders.ErrSecretNotFound) {
+	if err := loaded.Providers["storage"].Ready(context.Background(), htup.SecretsProviders{unavailableSecrets{}}); !errors.Is(err, htup.ErrSecretNotFound) {
 		t.Fatalf("storage readiness error = %v, want missing secret", err)
 	}
 }

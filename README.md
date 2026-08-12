@@ -5,7 +5,7 @@ reconciles local changes, and writes provider-neutral changeset files into an
 existing deployable payload directory.
 
 The low-level reconciliation API is provider-neutral. `Deployment` creates an
-hsync-enabled HyperProviders deployment: it prepares sync state, performs
+hsync-enabled htup deployment: it prepares sync state, performs
 conditional writes, uploads immutable blobs and manifests, and publishes the
 mutable synchronization index last.
 

@@ -6,15 +6,15 @@ import (
 	"net/url"
 	"os"
 
-	cli "github.com/herdworks/cli-go"
+	"github.com/herdworks/clif"
 	"github.com/herdworks/hsync"
 )
 
-var HSync = &cli.CLI{
+var HSync = &clif.CLI{
 	Name:        "hsync",
 	Version:     string(hsync.LibVersion),
 	Description: "hsync is an HTTP sync tool.",
-	Commands: cli.Commands{
+	Commands: clif.Commands{
 		downloadCommand(),
 		initCommand(),
 		pullCommand(),
@@ -22,7 +22,7 @@ var HSync = &cli.CLI{
 		resetCommand(),
 		statusCommand(),
 	},
-	Options: cli.CommandOptions{
+	Options: clif.CommandOptions{
 		{
 			Name:        "help",
 			ShortName:   "h",
@@ -38,13 +38,13 @@ func main() {
 	HSync.Execute()
 }
 
-func downloadCommand() *cli.Command {
-	return &cli.Command{
-		Config: cli.CommandConfig{
+func downloadCommand() *clif.Command {
+	return &clif.Command{
+		Config: clif.CommandConfig{
 			Name:        "download",
 			Description: "Download a website.",
 			Usage:       "hsync download <url> <directory>",
-			Validator: func(cmd *cli.Command) error {
+			Validator: func(cmd *clif.Command) error {
 				if len(cmd.Args) != 2 {
 					return fmt.Errorf("download requires a URL and destination directory")
 				}
@@ -55,7 +55,7 @@ func downloadCommand() *cli.Command {
 	}
 }
 
-func download(cmd *cli.Command) error {
+func download(cmd *clif.Command) error {
 	source, err := parseHTTPURL(cmd.Args[0])
 	if err != nil {
 		return fmt.Errorf("invalid URL %q", cmd.Args[0])
@@ -68,13 +68,13 @@ func download(cmd *cli.Command) error {
 	return nil
 }
 
-func initCommand() *cli.Command {
-	return &cli.Command{
-		Config: cli.CommandConfig{
+func initCommand() *clif.Command {
+	return &clif.Command{
+		Config: clif.CommandConfig{
 			Name:        "init",
 			Description: "Initialize a website for synchronization.",
 			Usage:       "hsync init <remote> [--config hsync.yaml]",
-			Validator: func(cmd *cli.Command) error {
+			Validator: func(cmd *clif.Command) error {
 				if len(cmd.Args) != 1 {
 					return fmt.Errorf("init requires one remote URL")
 				}
@@ -82,24 +82,24 @@ func initCommand() *cli.Command {
 			},
 			Handler: initialize,
 		},
-		Options: cli.CommandOptions{
+		Options: clif.CommandOptions{
 			{Name: "config", ShortName: "c", Description: "Configuration file to create.", Default: hsync.DefaultConfigPath},
 		},
 	}
 }
 
-func initialize(cmd *cli.Command) error {
+func initialize(cmd *clif.Command) error {
 	return hsync.InitializeConfig(cmd.Options.Get("config"), cmd.Args[0])
 }
 
-func pullCommand() *cli.Command {
-	return &cli.Command{
-		Config: cli.CommandConfig{
+func pullCommand() *clif.Command {
+	return &clif.Command{
+		Config: clif.CommandConfig{
 			Name:        "pull",
 			Description: "Pull remote changes into the workspace.",
 			Usage:       "hsync pull [directory] [--config path]",
 			Validator:   atMostOneDirectory,
-			Handler: func(cmd *cli.Command) error {
+			Handler: func(cmd *clif.Command) error {
 				config, err := commandSyncConfig(commandDirectory(cmd), cmd.Options.Get("config"))
 				if err != nil {
 					return err
@@ -111,17 +111,17 @@ func pullCommand() *cli.Command {
 				fmt.Println(result.ManifestID)
 				return nil
 			},
-		}, Options: cli.CommandOptions{{Name: "config", ShortName: "c", Description: "Configuration path (or HSYNC_CONFIG / detected hsync config)."}},
+		}, Options: clif.CommandOptions{{Name: "config", ShortName: "c", Description: "Configuration path (or HSYNC_CONFIG / detected hsync config)."}},
 	}
 }
 
-func pushCommand() *cli.Command {
-	return &cli.Command{
-		Config: cli.CommandConfig{
+func pushCommand() *clif.Command {
+	return &clif.Command{
+		Config: clif.CommandConfig{
 			Name:        "push",
 			Description: "Push local changes to the remote.",
 			Usage:       "hsync push [--config path] [options]",
-			Validator: func(cmd *cli.Command) error {
+			Validator: func(cmd *clif.Command) error {
 				if len(cmd.Args) != 0 {
 					return fmt.Errorf("push accepts no positional arguments; use --config to select a repository")
 				}
@@ -130,7 +130,7 @@ func pushCommand() *cli.Command {
 				}
 				return nil
 			},
-			Handler: func(cmd *cli.Command) error {
+			Handler: func(cmd *clif.Command) error {
 				configPath, err := commandConfigPath(".", cmd.Options.Get("config"))
 				if err != nil {
 					return err
@@ -145,7 +145,7 @@ func pushCommand() *cli.Command {
 				})
 			},
 		},
-		Options: cli.CommandOptions{
+		Options: clif.CommandOptions{
 			{Name: "config", ShortName: "c", Description: "Configuration path (or HSYNC_CONFIG / detected hsync config)."},
 			{Name: "environment", ShortName: "e", Description: "Deployment environment (default: hsync)."},
 			{Name: "providers", Description: "Comma-separated provider names."},
@@ -153,14 +153,14 @@ func pushCommand() *cli.Command {
 	}
 }
 
-func resetCommand() *cli.Command {
-	return &cli.Command{
-		Config: cli.CommandConfig{
+func resetCommand() *clif.Command {
+	return &clif.Command{
+		Config: clif.CommandConfig{
 			Name:        "reset",
 			Description: "Reset modified files in the workspace.",
 			Usage:       "hsync reset [directory] [--config path] [--interactive]",
 			Validator:   atMostOneDirectory,
-			Handler: func(cmd *cli.Command) error {
+			Handler: func(cmd *clif.Command) error {
 				config, err := commandSyncConfig(commandDirectory(cmd), cmd.Options.Get("config"))
 				if err != nil {
 					return err
@@ -177,21 +177,21 @@ func resetCommand() *cli.Command {
 				return nil
 			},
 		},
-		Options: cli.CommandOptions{
+		Options: clif.CommandOptions{
 			{Name: "config", ShortName: "c", Description: "Configuration path (or HSYNC_CONFIG / detected hsync config)."},
 			{Name: "interactive", ShortName: "i", Description: "Choose each tracked file to restore.", Boolean: true},
 		},
 	}
 }
 
-func statusCommand() *cli.Command {
-	return &cli.Command{
-		Config: cli.CommandConfig{
+func statusCommand() *clif.Command {
+	return &clif.Command{
+		Config: clif.CommandConfig{
 			Name:        "status",
 			Description: "List modified files in the workspace.",
 			Usage:       "hsync status [directory] [--config path]",
 			Validator:   atMostOneDirectory,
-			Handler: func(cmd *cli.Command) error {
+			Handler: func(cmd *clif.Command) error {
 				config, err := commandSyncConfig(commandDirectory(cmd), cmd.Options.Get("config"))
 				if err != nil {
 					return err
@@ -210,7 +210,7 @@ func statusCommand() *cli.Command {
 				}
 				return nil
 			},
-		}, Options: cli.CommandOptions{{Name: "config", ShortName: "c", Description: "Configuration path (or HSYNC_CONFIG / detected hsync config)."}},
+		}, Options: clif.CommandOptions{{Name: "config", ShortName: "c", Description: "Configuration path (or HSYNC_CONFIG / detected hsync config)."}},
 	}
 }
 
@@ -249,7 +249,7 @@ func commandSyncConfig(root, explicit string) (hsync.RepositoryConfig, error) {
 	return config, nil
 }
 
-func atMostOneDirectory(cmd *cli.Command) error {
+func atMostOneDirectory(cmd *clif.Command) error {
 	if len(cmd.Args) > 1 {
 		return fmt.Errorf("%s accepts at most one directory", cmd.Config.Name)
 	}
@@ -259,7 +259,7 @@ func atMostOneDirectory(cmd *cli.Command) error {
 	return nil
 }
 
-func commandDirectory(cmd *cli.Command) string {
+func commandDirectory(cmd *clif.Command) string {
 	if len(cmd.Args) == 1 {
 		return cmd.Args[0]
 	}
