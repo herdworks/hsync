@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.4.0 (2026-08-11)
+
 * **BREAKING:** Updated dependencies to `github.com/herdworks/clif` v0.2.0,
   `github.com/herdworks/hq` v0.24.0, `github.com/herdworks/htup` v0.27.1,
   and `github.com/herdworks/hypermedia` v0.2.0. The hsync `Deployment` API
