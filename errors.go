@@ -14,4 +14,6 @@ var (
 	ErrStalePending = errors.New("stale pending deployment")
 	// ErrManualResolution reports a manifest relationship that v1 cannot merge.
 	ErrManualResolution = errors.New("manual synchronization resolution required")
+	// ErrSyncConfigNotFound reports a repository without an hsync configuration.
+	ErrSyncConfigNotFound = errors.New("synchronization configuration not found")
 )

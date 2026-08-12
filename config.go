@@ -276,6 +276,32 @@ func (expression PathExpression) matchesPath(value string) bool {
 	return globMatch(expression.pattern, value)
 }
 
+// LoadSyncConfig loads one explicit or discovered hsync configuration rooted at
+// directory. It requires and validates the synchronization configuration.
+func LoadSyncConfig(directory, filename string) (RepositoryConfig, error) {
+	if filename == "" {
+		var err error
+		filename, err = DiscoverConfig(directory)
+		if err != nil {
+			return RepositoryConfig{}, err
+		}
+	}
+	if filename == "" {
+		return RepositoryConfig{}, ErrSyncConfigNotFound
+	}
+	config, _, err := ReadConfig(filename)
+	if err != nil {
+		return RepositoryConfig{}, err
+	}
+	if config.Sync == nil {
+		return RepositoryConfig{}, fmt.Errorf("sync configuration is empty")
+	}
+	if err := config.Sync.Validate(); err != nil {
+		return RepositoryConfig{}, err
+	}
+	return config, nil
+}
+
 // DiscoverConfig returns one unambiguous default configuration directly under
 // directory. It returns an empty path when none is present.
 func DiscoverConfig(directory string) (string, error) {

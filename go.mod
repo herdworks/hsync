@@ -4,7 +4,7 @@ go 1.26
 
 // first-party dependencies
 require (
-	github.com/herdworks/clif v0.2.0
+	github.com/herdworks/clic v0.3.1
 	github.com/herdworks/hq v0.24.0
 	github.com/herdworks/htup v0.27.1
 	github.com/herdworks/hypermedia v0.2.0

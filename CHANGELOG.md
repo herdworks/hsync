@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* Added an importable `hsync/cli` package with fresh canonical command
+  factories for download, init, pull, push, reset, and status. Hosts can mount
+  or remix these commands, and the standalone executable now composes them
+  through clic.
+* Added `LoadSyncConfig` and `ErrSyncConfigNotFound` for loading an explicit
+  or discovered validated synchronization configuration.
+* Updated the CLI framework dependency to `github.com/herdworks/clic` v0.3.1.
+  Hsync commands now provide `-h` / `--help` through clic's `DefaultHelp`.
+
 ## v0.4.0 (2026-08-11)
 
 * **BREAKING:** Updated dependencies to `github.com/herdworks/clif` v0.2.0,

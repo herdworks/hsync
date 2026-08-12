@@ -107,6 +107,24 @@ func TestDiscoverConfigUsesRepositoryRoot(t *testing.T) {
 	}
 }
 
+func TestLoadSyncConfig(t *testing.T) {
+	root := t.TempDir()
+	if _, err := LoadSyncConfig(root, ""); !errors.Is(err, ErrSyncConfigNotFound) {
+		t.Fatalf("LoadSyncConfig() error = %v, want ErrSyncConfigNotFound", err)
+	}
+	filename := filepath.Join(root, DefaultConfigPath)
+	if err := os.WriteFile(filename, []byte("sync:\n  remote: https://example.com/.sync/index.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadSyncConfig(root, "")
+	if err != nil {
+		t.Fatalf("LoadSyncConfig() = %v", err)
+	}
+	if config.Path != filename || config.Sync == nil {
+		t.Fatalf("LoadSyncConfig() = %#v", config)
+	}
+}
+
 func TestReadConfigRecordsPath(t *testing.T) {
 	root := t.TempDir()
 	expected := filepath.Join(root, "site.yaml")
