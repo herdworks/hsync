@@ -91,6 +91,7 @@ func PushProvidersOption() clic.Option {
 func PushProvidersMeta() clic.OptionMeta {
 	return clic.OptionMeta{
 		Name:        "providers",
+		ShortName:   "p",
 		Description: "Comma-separated provider names.",
 	}
 }
@@ -104,10 +105,21 @@ func PushProvidersSpec() clic.OptionSpec {
 // push validation
 func pushValidator(execution *clic.Execution) error {
 	if execution.Command.PositionalArguments() != 0 {
-		return fmt.Errorf("push accepts no positional arguments; use --config to select a repository")
+		return fmt.Errorf(
+			"%s accepts no positional arguments; use -%s/--%s to select a repository",
+			execution.Command.Meta.Name,
+			execution.Options["config"].Meta.ShortName,
+			execution.Options["config"].Meta.Name,
+		)
 	}
 	if execution.Options["environment"].StringValue() != "" && execution.Options["providers"].StringValue() != "" {
-		return fmt.Errorf("--providers and --environment are mutually exclusive")
+		return fmt.Errorf(
+			"-%s/--%s and -%s/--%s are mutually exclusive",
+			execution.Options["providers"].Meta.ShortName,
+			execution.Options["providers"].Meta.Name,
+			execution.Options["environment"].Meta.ShortName,
+			execution.Options["environment"].Meta.Name,
+		)
 	}
 	return nil
 }

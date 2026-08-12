@@ -26,19 +26,11 @@ func PullMeta() clic.CommandMeta {
 func PullSpec() clic.CommandSpec {
 	config := PullConfigOption()
 	return clic.CommandSpec{
-		Key:     "pull",
-		Options: clic.Options{"config": &config},
-		Help:    clic.DefaultHelp,
-		Validator: func(execution *clic.Execution) error {
-			if execution.Command.PositionalArguments() > 1 {
-				return fmt.Errorf("pull accepts at most one directory")
-			}
-			if execution.Command.PositionalArguments() > 0 && execution.Options["config"].StringValue() != "" {
-				return fmt.Errorf("pull cannot combine a directory with --config or HSYNC_CONFIG")
-			}
-			return nil
-		},
-		Handler: pullHandler,
+		Key:       "pull",
+		Options:   clic.Options{"config": &config},
+		Help:      clic.DefaultHelp,
+		Validator: pullValidator,
+		Handler:   pullHandler,
 	}
 }
 
@@ -59,6 +51,29 @@ func PullConfigSpec() clic.OptionSpec {
 		Key:  "config",
 		Kind: clic.StringOption,
 	}
+}
+
+// pull validator
+func pullValidator(execution *clic.Execution) error {
+	// ensure no more than one directory configured
+	if execution.Command.PositionalArguments() > 1 {
+		return fmt.Errorf(
+			"%s accepts at most one directory",
+			execution.Command.Meta.Name,
+		)
+	}
+
+	// validate configuration
+	if execution.Command.PositionalArguments() > 0 && execution.Options["config"].StringValue() != "" {
+		return fmt.Errorf(
+			"%s cannot combine a directory argument with -%s/--%s or $%s",
+			execution.Command.Meta.Name,
+			execution.Options["config"].Meta.ShortName,
+			execution.Options["config"].Meta.Name,
+			execution.Options["config"].Meta.EnvName,
+		)
+	}
+	return nil
 }
 
 // pull handler

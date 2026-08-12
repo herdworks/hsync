@@ -26,19 +26,11 @@ func StatusMeta() clic.CommandMeta {
 func StatusSpec() clic.CommandSpec {
 	config := StatusConfigOption()
 	return clic.CommandSpec{
-		Key:     "status",
-		Options: clic.Options{"config": &config},
-		Help:    clic.DefaultHelp,
-		Validator: func(execution *clic.Execution) error {
-			if execution.Command.PositionalArguments() > 1 {
-				return fmt.Errorf("status accepts at most one directory")
-			}
-			if execution.Command.PositionalArguments() > 0 && execution.Options["config"].StringValue() != "" {
-				return fmt.Errorf("status cannot combine a directory with --config or HSYNC_CONFIG")
-			}
-			return nil
-		},
-		Handler: statusHandler,
+		Key:       "status",
+		Options:   clic.Options{"config": &config},
+		Help:      clic.DefaultHelp,
+		Validator: statusValidator,
+		Handler:   statusHandler,
 	}
 }
 
@@ -57,6 +49,24 @@ func StatusConfigSpec() clic.OptionSpec {
 		Key:  "config",
 		Kind: clic.StringOption,
 	}
+}
+
+// status validator
+func statusValidator(execution *clic.Execution) error {
+	if execution.Command.PositionalArguments() > 1 {
+		return fmt.Errorf("%s accepts at most one directory", execution.Command.Meta.Name)
+	}
+	config := execution.Options["config"]
+	if execution.Command.PositionalArguments() > 0 && config.StringValue() != "" {
+		return fmt.Errorf(
+			"%s cannot combine a directory argument with -%s/--%s or $%s",
+			execution.Command.Meta.Name,
+			config.Meta.ShortName,
+			config.Meta.Name,
+			config.Meta.EnvName,
+		)
+	}
+	return nil
 }
 
 // status handler

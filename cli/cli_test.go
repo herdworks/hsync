@@ -92,6 +92,38 @@ func TestLeafCommandHelp(t *testing.T) {
 	}
 }
 
+func TestRemixedValidatorsUseHostMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		command  clic.Command
+		args     clic.Arguments
+		contains string
+	}{
+		{name: "pull", command: PullCommand(), args: clic.Arguments{"retrieve", "checkout", "--config", "site.yaml"}, contains: "retrieve cannot combine a directory argument with -c/--config or $HYPER_CONFIG"},
+		{name: "reset", command: ResetCommand(), args: clic.Arguments{"restore", "checkout", "--config", "site.yaml"}, contains: "restore cannot combine a directory argument with -c/--config or $HYPER_CONFIG"},
+		{name: "status", command: StatusCommand(), args: clic.Arguments{"inspect", "checkout", "--config", "site.yaml"}, contains: "inspect cannot combine a directory argument with -c/--config or $HYPER_CONFIG"},
+		{name: "push positional", command: PushCommand(), args: clic.Arguments{"publish", "checkout"}, contains: "publish accepts no positional arguments; use -c/--config to select a repository"},
+		{name: "push options", command: PushCommand(), args: clic.Arguments{"publish", "--environment", "production", "--targets", "origin"}, contains: "-p/--targets and -e/--environment are mutually exclusive"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			command := test.command
+			command.Meta.Name = map[string]string{"pull": "retrieve", "reset": "restore", "status": "inspect", "push": "publish"}[command.Spec.Key]
+			if config, ok := command.Spec.Options["config"]; ok {
+				config.Meta.EnvName = "HYPER_CONFIG"
+			}
+			if providers, ok := command.Spec.Options["providers"]; ok {
+				providers.Meta.Name = "targets"
+			}
+			cli := clic.CLI{Command: clic.Command{Meta: clic.CommandMeta{Name: "host"}, Spec: clic.CommandSpec{Key: "host"}, Commands: clic.Commands{command.Spec.Key: &command}}}
+			result := cli.Run(execution(t), test.args)
+			if result.Error == nil || !strings.Contains(result.Error.Error(), test.contains) {
+				t.Fatalf("Run() error = %v, want containing %q", result.Error, test.contains)
+			}
+		})
+	}
+}
+
 func execution(t *testing.T) clic.Execution {
 	t.Helper()
 	return clic.Execution{Context: context.Background(), Stdout: io.Discard, Stderr: io.Discard, LookupEnv: func(string) (string, bool) { return "", false }, WorkingDirectory: t.TempDir()}

@@ -32,16 +32,8 @@ func ResetSpec() clic.CommandSpec {
 			"config":      &config,
 			"interactive": &interactive,
 		},
-		Validator: func(execution *clic.Execution) error {
-			if execution.Command.PositionalArguments() > 1 {
-				return fmt.Errorf("reset accepts at most one directory")
-			}
-			if execution.Command.PositionalArguments() > 0 && execution.Options["config"].StringValue() != "" {
-				return fmt.Errorf("reset cannot combine a directory with --config or HSYNC_CONFIG")
-			}
-			return nil
-		},
-		Handler: resetHandler,
+		Validator: resetValidator,
+		Handler:   resetHandler,
 	}
 }
 
@@ -77,6 +69,24 @@ func ResetInteractiveMeta() clic.OptionMeta {
 
 func ResetInteractiveSpec() clic.OptionSpec {
 	return clic.OptionSpec{Key: "interactive", Kind: clic.BoolOption}
+}
+
+// reset validator
+func resetValidator(execution *clic.Execution) error {
+	if execution.Command.PositionalArguments() > 1 {
+		return fmt.Errorf("%s accepts at most one directory", execution.Command.Meta.Name)
+	}
+	config := execution.Options["config"]
+	if execution.Command.PositionalArguments() > 0 && config.StringValue() != "" {
+		return fmt.Errorf(
+			"%s cannot combine a directory argument with -%s/--%s or $%s",
+			execution.Command.Meta.Name,
+			config.Meta.ShortName,
+			config.Meta.Name,
+			config.Meta.EnvName,
+		)
+	}
+	return nil
 }
 
 // reset handler
