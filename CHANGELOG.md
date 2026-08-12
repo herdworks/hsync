@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.5.0 (2026-08-12)
+
 * Added an importable `hsync/cli` package with fresh canonical command
   factories for download, init, pull, push, reset, and status. Hosts can mount
   or remix these commands, and the standalone executable now composes them
