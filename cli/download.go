@@ -11,25 +11,16 @@ import (
 // download command
 func DownloadCommand() clic.Command {
 	return clic.Command{
-		Meta: DownloadMeta(),
-		Spec: DownloadSpec(),
-	}
-}
-
-func DownloadMeta() clic.CommandMeta {
-	return clic.CommandMeta{
-		Name:        "download",
-		Description: "Download a website.",
-		Usage:       []string{"hsync download <url> <directory>"},
-	}
-}
-
-func DownloadSpec() clic.CommandSpec {
-	return clic.CommandSpec{
-		Key:       "download",
-		Help:      clic.DefaultHelp,
-		Validator: downloadValidator,
-		Handler:   downloadHandler,
+		Meta: clic.CommandMeta{
+			Description: "Download a website.",
+			Usage:       []string{"{{ .Command }} <url> <directory>"},
+		},
+		Spec: clic.CommandSpec{
+			Key:       "download",
+			Help:      clic.DefaultHelp,
+			Validator: downloadValidator,
+			Handler:   downloadHandler,
+		},
 	}
 }
 

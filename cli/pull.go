@@ -9,47 +9,21 @@ import (
 
 // pull command
 func PullCommand() clic.Command {
+	config := GlobalConfigOption()
 	return clic.Command{
-		Meta: PullMeta(),
-		Spec: PullSpec(),
-	}
-}
-
-func PullMeta() clic.CommandMeta {
-	return clic.CommandMeta{
-		Name:        "pull",
-		Description: "Pull remote changes into the workspace.",
-		Usage:       []string{"hsync pull [directory] [--config path]"},
-	}
-}
-
-func PullSpec() clic.CommandSpec {
-	config := PullConfigOption()
-	return clic.CommandSpec{
-		Key:       "pull",
-		Options:   clic.Options{"config": &config},
-		Help:      clic.DefaultHelp,
-		Validator: pullValidator,
-		Handler:   pullHandler,
-	}
-}
-
-// pull --config option
-func PullConfigOption() clic.Option {
-	return clic.Option{
-		Meta: PullConfigMeta(),
-		Spec: PullConfigSpec(),
-	}
-}
-
-func PullConfigMeta() clic.OptionMeta {
-	return configOptionMeta()
-}
-
-func PullConfigSpec() clic.OptionSpec {
-	return clic.OptionSpec{
-		Key:  "config",
-		Kind: clic.StringOption,
+		Meta: clic.CommandMeta{
+			Description: "Pull remote changes into the workspace.",
+			Usage:       []string{"{{ .Command }} [directory] [--config path]"},
+		},
+		Spec: clic.CommandSpec{
+			Key: "pull",
+			Options: clic.Options{
+				config.Spec.Key: &config,
+			},
+			Help:      clic.DefaultHelp,
+			Validator: pullValidator,
+			Handler:   pullHandler,
+		},
 	}
 }
 

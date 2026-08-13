@@ -10,10 +10,17 @@ import (
 
 // CLI is hsync's canonical standalone command composition.
 var CLI = clic.CLI{
-	Command: clic.Command{
+	Command: Command(),
+	Version: string(hsync.LibVersion),
+}
+
+// Command returns hsync's canonical command composition.
+func Command() clic.Command {
+	return clic.Command{
 		Meta: clic.CommandMeta{
-			Name:        hsync.LibName,
 			Description: fmt.Sprintf("%s is an HTTP sync tool.", hsync.LibName),
+			Usage:       []string{"{{ .Command }} [command] [options]"},
+			EnvPrefix:   "HSYNC_",
 		},
 		Spec: clic.CommandSpec{
 			Key:  hsync.LibName,
@@ -27,20 +34,21 @@ var CLI = clic.CLI{
 			ResetCommand,
 			StatusCommand,
 		),
-	},
-	Version: string(hsync.LibVersion),
+	}
 }
 
-// globals
-
-// --config option
-func configOptionMeta() clic.OptionMeta {
-	var env string = "HSYNC_CONFIG"
-	return clic.OptionMeta{
-		Name:        "config",
-		ShortName:   "c",
-		Description: fmt.Sprintf("Configuration path (or %s / detected hsync config).", env),
-		EnvName:     env,
-		ShowDefault: true,
+// GlobalConfigOption returns the reusable --config option for existing checkouts.
+func GlobalConfigOption() clic.Option {
+	return clic.Option{
+		Meta: clic.OptionMeta{
+			ShortName:   "c",
+			Description: "Configuration path (or ${{ .EnvName }} / detected hsync config).",
+			EnvName:     "{{ .EnvPrefix }}CONFIG",
+			ShowDefault: true,
+		},
+		Spec: clic.OptionSpec{
+			Key:  "config",
+			Kind: clic.StringOption,
+		},
 	}
 }

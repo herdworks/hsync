@@ -9,96 +9,58 @@ import (
 
 // push command
 func PushCommand() clic.Command {
+	config := GlobalConfigOption()
+	environment := PushEnvironmentOption()
+	providers := PushProvidersOption()
 	return clic.Command{
-		Meta: PushMeta(),
-		Spec: PushSpec(),
-	}
-}
-func PushMeta() clic.CommandMeta {
-	return clic.CommandMeta{
-		Name:        "push",
-		Description: "Push local changes to the remote.",
-		Usage: []string{
-			"hsync push",
-			"hsync push [--config path]",
-			"hsync push [--config path] [--environment environment]",
-			"hsync push [--config path] [--providers provider,provider]",
+		Meta: clic.CommandMeta{
+			Description: "Push local changes to the remote.",
+			Usage: []string{
+				"{{ .Command }}",
+				"{{ .Command }} [--config path]",
+				"{{ .Command }} [--config path] [--environment environment]",
+				"{{ .Command }} [--config path] [--providers provider,provider]",
+			},
 		},
-	}
-}
-func PushSpec() clic.CommandSpec {
-	var config clic.Option = PushConfigOption()
-	var environment clic.Option = PushEnvironmentOption()
-	var providers clic.Option = PushProvidersOption()
-	return clic.CommandSpec{
-		Key:  "push",
-		Help: clic.DefaultHelp,
-		Options: clic.Options{
-			"config":      &config,
-			"environment": &environment,
-			"providers":   &providers,
+		Spec: clic.CommandSpec{
+			Key:  "push",
+			Help: clic.DefaultHelp,
+			Options: clic.Options{
+				"config":      &config,
+				"environment": &environment,
+				"providers":   &providers,
+			},
+			Validator: pushValidator,
+			Handler:   pushHandler,
 		},
-		Validator: pushValidator,
-		Handler:   pushHandler,
-	}
-}
-
-// push --config option
-func PushConfigOption() clic.Option {
-	return clic.Option{
-		Meta: PushConfigMeta(),
-		Spec: PushConfigSpec(),
-	}
-}
-func PushConfigMeta() clic.OptionMeta {
-	return configOptionMeta()
-}
-func PushConfigSpec() clic.OptionSpec {
-	return clic.OptionSpec{
-		Key:  "config",
-		Kind: clic.StringOption,
 	}
 }
 
 // push --environment option
 func PushEnvironmentOption() clic.Option {
 	return clic.Option{
-		Meta: PushEnvironmentMeta(),
-		Spec: PushEnvironmentSpec(),
-	}
-}
-func PushEnvironmentMeta() clic.OptionMeta {
-	return clic.OptionMeta{
-		Name:        "environment",
-		ShortName:   "e",
-		Description: "Deployment environment (default: hsync).",
-	}
-}
-func PushEnvironmentSpec() clic.OptionSpec {
-	return clic.OptionSpec{
-		Key:  "environment",
-		Kind: clic.StringOption,
+		Meta: clic.OptionMeta{
+			ShortName:   "e",
+			Description: "Deployment environment (default: hsync).",
+		},
+		Spec: clic.OptionSpec{
+			Key:  "environment",
+			Kind: clic.StringOption,
+		},
 	}
 }
 
 // push --providers option
 func PushProvidersOption() clic.Option {
 	return clic.Option{
-		Meta: PushProvidersMeta(),
-		Spec: PushProvidersSpec(),
-	}
-}
-func PushProvidersMeta() clic.OptionMeta {
-	return clic.OptionMeta{
-		Name:        "providers",
-		ShortName:   "p",
-		Description: "Comma-separated provider names.",
-	}
-}
-func PushProvidersSpec() clic.OptionSpec {
-	return clic.OptionSpec{
-		Key:  "providers",
-		Kind: clic.StringOption,
+		Meta: clic.OptionMeta{
+			ShortName:   "p",
+			Description: "Comma-separated provider names.",
+		},
+		Spec: clic.OptionSpec{
+			Key:  "providers",
+			Kind: clic.StringOption,
+		},
 	}
 }
 

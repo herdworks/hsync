@@ -9,66 +9,37 @@ import (
 
 // reset command
 func ResetCommand() clic.Command {
+	config, interactive := GlobalConfigOption(), ResetInteractiveOption()
 	return clic.Command{
-		Meta: ResetMeta(),
-		Spec: ResetSpec(),
-	}
-}
-
-func ResetMeta() clic.CommandMeta {
-	return clic.CommandMeta{
-		Name:        "reset",
-		Description: "Reset modified files in the workspace.",
-		Usage:       []string{"hsync reset [directory] [--config path] [--interactive]"},
-	}
-}
-
-func ResetSpec() clic.CommandSpec {
-	config, interactive := ResetConfigOption(), ResetInteractiveOption()
-	return clic.CommandSpec{
-		Key:  "reset",
-		Help: clic.DefaultHelp,
-		Options: clic.Options{
-			"config":      &config,
-			"interactive": &interactive,
+		Meta: clic.CommandMeta{
+			Description: "Reset modified files in the workspace.",
+			Usage:       []string{"{{ .Command }} [directory] [--config path] [--interactive]"},
 		},
-		Validator: resetValidator,
-		Handler:   resetHandler,
+		Spec: clic.CommandSpec{
+			Key:  "reset",
+			Help: clic.DefaultHelp,
+			Options: clic.Options{
+				"config":      &config,
+				"interactive": &interactive,
+			},
+			Validator: resetValidator,
+			Handler:   resetHandler,
+		},
 	}
-}
-
-// reset --config option
-func ResetConfigOption() clic.Option {
-	return clic.Option{
-		Meta: ResetConfigMeta(),
-		Spec: ResetConfigSpec(),
-	}
-}
-
-func ResetConfigMeta() clic.OptionMeta { return configOptionMeta() }
-
-func ResetConfigSpec() clic.OptionSpec {
-	return clic.OptionSpec{Key: "config", Kind: clic.StringOption}
 }
 
 // reset --interactive option
 func ResetInteractiveOption() clic.Option {
 	return clic.Option{
-		Meta: ResetInteractiveMeta(),
-		Spec: ResetInteractiveSpec(),
+		Meta: clic.OptionMeta{
+			ShortName:   "i",
+			Description: "Choose each tracked file to restore.",
+		},
+		Spec: clic.OptionSpec{
+			Key:  "interactive",
+			Kind: clic.BoolOption,
+		},
 	}
-}
-
-func ResetInteractiveMeta() clic.OptionMeta {
-	return clic.OptionMeta{
-		Name:        "interactive",
-		ShortName:   "i",
-		Description: "Choose each tracked file to restore.",
-	}
-}
-
-func ResetInteractiveSpec() clic.OptionSpec {
-	return clic.OptionSpec{Key: "interactive", Kind: clic.BoolOption}
 }
 
 // reset validator

@@ -9,45 +9,19 @@ import (
 
 // status command
 func StatusCommand() clic.Command {
+	config := GlobalConfigOption()
 	return clic.Command{
-		Meta: StatusMeta(),
-		Spec: StatusSpec(),
-	}
-}
-
-func StatusMeta() clic.CommandMeta {
-	return clic.CommandMeta{
-		Name:        "status",
-		Description: "List modified files in the workspace.",
-		Usage:       []string{"hsync status [directory] [--config path]"},
-	}
-}
-
-func StatusSpec() clic.CommandSpec {
-	config := StatusConfigOption()
-	return clic.CommandSpec{
-		Key:       "status",
-		Options:   clic.Options{"config": &config},
-		Help:      clic.DefaultHelp,
-		Validator: statusValidator,
-		Handler:   statusHandler,
-	}
-}
-
-// status --config option
-func StatusConfigOption() clic.Option {
-	return clic.Option{
-		Meta: StatusConfigMeta(),
-		Spec: StatusConfigSpec(),
-	}
-}
-
-func StatusConfigMeta() clic.OptionMeta { return configOptionMeta() }
-
-func StatusConfigSpec() clic.OptionSpec {
-	return clic.OptionSpec{
-		Key:  "config",
-		Kind: clic.StringOption,
+		Meta: clic.CommandMeta{
+			Description: "List modified files in the workspace.",
+			Usage:       []string{"{{ .Command }} [directory] [--config path]"},
+		},
+		Spec: clic.CommandSpec{
+			Key:       "status",
+			Options:   clic.Options{"config": &config},
+			Help:      clic.DefaultHelp,
+			Validator: statusValidator,
+			Handler:   statusHandler,
+		},
 	}
 }
 

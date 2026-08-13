@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* **Added:** `hsync/cli.Command`, a fresh factory for the standalone hsync
+  command tree. Hosts can mount or remix the root and leaf commands without
+  sharing command state.
+* **Changed:** Command usage, validation errors, and configuration help now
+  render the mounted command path and effective environment-variable prefix.
+  The standalone CLI uses `HSYNC_CONFIG`; a host can supply its own prefix.
+* Updated `github.com/herdworks/clic` to v0.4.1.
+
 ## v0.5.1 (2026-08-12)
 
 * Improved reusable CLI command validation so host-remixed command, option,

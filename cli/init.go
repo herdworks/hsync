@@ -9,52 +9,24 @@ import (
 
 // init command
 func InitCommand() clic.Command {
+	config := GlobalConfigOption()
+	config.Meta.Description = "Configuration file to create (or ${{ .EnvName }})."
+	config.Meta.Default = hsync.DefaultConfigPath
+	config.Meta.ShowDefault = false
 	return clic.Command{
-		Meta: InitMeta(),
-		Spec: InitSpec(),
-	}
-}
-
-func InitMeta() clic.CommandMeta {
-	return clic.CommandMeta{
-		Name:        "init",
-		Description: "Initialize a website for synchronization.",
-		Usage:       []string{"hsync init <remote> [--config hsync.yaml]"},
-	}
-}
-
-func InitSpec() clic.CommandSpec {
-	config := InitConfigOption()
-	return clic.CommandSpec{
-		Key:       "init",
-		Options:   clic.Options{"config": &config},
-		Help:      clic.DefaultHelp,
-		Validator: initValidator,
-		Handler:   initHandler,
-	}
-}
-
-// init --config option
-func InitConfigOption() clic.Option {
-	return clic.Option{
-		Meta: InitConfigMeta(),
-		Spec: InitConfigSpec(),
-	}
-}
-
-func InitConfigMeta() clic.OptionMeta {
-	return clic.OptionMeta{
-		Name:        "config",
-		ShortName:   "c",
-		Description: "Configuration file to create.",
-		Default:     hsync.DefaultConfigPath,
-	}
-}
-
-func InitConfigSpec() clic.OptionSpec {
-	return clic.OptionSpec{
-		Key:  "config",
-		Kind: clic.StringOption,
+		Meta: clic.CommandMeta{
+			Description: "Initialize a website for synchronization.",
+			Usage:       []string{"{{ .Command }} <remote> [--config hsync.yaml]"},
+		},
+		Spec: clic.CommandSpec{
+			Key: "init",
+			Options: clic.Options{
+				config.Spec.Key: &config,
+			},
+			Help:      clic.DefaultHelp,
+			Validator: initValidator,
+			Handler:   initHandler,
+		},
 	}
 }
 

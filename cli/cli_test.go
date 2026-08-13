@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/herdworks/clic"
+	"github.com/herdworks/hsync"
 )
 
 func TestCLIAndCommandFactoriesSupportCanonicalAndRemixedMounting(t *testing.T) {
@@ -33,13 +34,71 @@ func TestCLIAndCommandFactoriesSupportCanonicalAndRemixedMounting(t *testing.T) 
 	remixed.Meta.Name = "bootstrap"
 	remixed.Meta.Description = "Host-specific setup."
 	remixed.Spec.Options["config"].Meta.Default = filepath.Join(t.TempDir(), "remixed.yaml")
-	host := clic.CLI{Command: clic.Command{Meta: clic.CommandMeta{Name: "host"}, Spec: clic.CommandSpec{Key: "host"}, Commands: clic.Commands{"init": &remixed}}}
+	host := clic.CLI{Command: clic.Command{Spec: clic.CommandSpec{Key: "host"}, Commands: clic.Commands{"init": &remixed}}}
 	result = host.Run(execution(t), clic.Arguments{"bootstrap", "https://example.com/.sync/index.json"})
 	if result.Error != nil {
 		t.Fatalf("remixed Run() = %#v", result)
 	}
 	if _, err := os.Stat(remixed.Spec.Options["config"].Meta.Default.(string)); err != nil {
 		t.Fatalf("remixed config = %v", err)
+	}
+}
+
+func TestGlobalConfigOptionSupportsInitAndExistingCheckouts(t *testing.T) {
+	global := GlobalConfigOption()
+	if global.Meta.Default != nil {
+		t.Fatalf("GlobalConfigOption().Meta.Default = %#v, want nil", global.Meta.Default)
+	}
+	if global.Meta.EnvName != "{{ .EnvPrefix }}CONFIG" {
+		t.Fatalf("GlobalConfigOption().Meta.EnvName = %q", global.Meta.EnvName)
+	}
+
+	init := InitCommand().Spec.Options["config"]
+	if init.Meta.Default != hsync.DefaultConfigPath {
+		t.Fatalf("InitCommand config default = %#v, want %q", init.Meta.Default, hsync.DefaultConfigPath)
+	}
+	if init.Meta.Description != "Configuration file to create (or ${{ .EnvName }})." {
+		t.Fatalf("InitCommand config description = %q", init.Meta.Description)
+	}
+	if init.Meta.ShowDefault {
+		t.Fatal("InitCommand config should preserve its hidden default")
+	}
+
+	for _, command := range []clic.Command{PullCommand(), PushCommand(), ResetCommand(), StatusCommand()} {
+		config := command.Spec.Options["config"]
+		if config.Meta.Default != nil || config.Meta.Description != global.Meta.Description || config.Meta.EnvName != global.Meta.EnvName {
+			t.Fatalf("%s config = %#v, want reusable global config option", command.Spec.Key, config.Meta)
+		}
+	}
+}
+
+func TestCommandFactorySupportsRootRemixing(t *testing.T) {
+	first, second := Command(), Command()
+	if first.Commands["init"] == second.Commands["init"] {
+		t.Fatal("factory returned shared commands")
+	}
+
+	remixed := Command()
+	remixed.Meta.EnvPrefix = ""
+	remixed.Spec.Key = "sync"
+	host := clic.CLI{
+		Command: clic.Command{
+			Meta: clic.CommandMeta{EnvPrefix: "HYPER_"},
+			Spec: clic.CommandSpec{
+				Key: "hyperctl",
+			},
+			Commands: clic.Commands{
+				"sync": &remixed,
+			},
+		},
+	}
+	config := remixed.Commands["pull"].Spec.Options["config"]
+	result := host.Run(execution(t), clic.Arguments{"sync", "pull", "checkout", "--config", "site.yaml"})
+	if result.Error == nil || !strings.Contains(result.Error.Error(), "$HYPER_CONFIG") {
+		t.Fatalf("remixed Run() error = %v", result.Error)
+	}
+	if config.Meta.EnvName != "{{ .EnvPrefix }}CONFIG" {
+		t.Fatalf("config environment template = %q", config.Meta.EnvName)
 	}
 }
 
@@ -55,7 +114,6 @@ func TestCommandFactoriesComposeEveryCanonicalHsyncCommand(t *testing.T) {
 	expected := []string{"download", "init", "pull", "push", "reset", "status"}
 	commands := clic.MustCommandsFrom(factories...)
 	composition := clic.CLI{Command: clic.Command{
-		Meta:     clic.CommandMeta{Name: "host"},
 		Spec:     clic.CommandSpec{Key: "host"},
 		Commands: commands,
 	}}
@@ -64,7 +122,7 @@ func TestCommandFactoriesComposeEveryCanonicalHsyncCommand(t *testing.T) {
 	}
 	for index, key := range expected {
 		command, ok := CLI.SubCommand(key)
-		if !ok || command.Spec.Key != key || command.Meta.Name != key {
+		if !ok || command.Spec.Key != key || command.Name() != key {
 			t.Fatalf("canonical command %q = %#v, %t", key, command, ok)
 		}
 		if command.Spec.Help == nil {
@@ -115,7 +173,7 @@ func TestRemixedValidatorsUseHostMetadata(t *testing.T) {
 			if providers, ok := command.Spec.Options["providers"]; ok {
 				providers.Meta.Name = "targets"
 			}
-			cli := clic.CLI{Command: clic.Command{Meta: clic.CommandMeta{Name: "host"}, Spec: clic.CommandSpec{Key: "host"}, Commands: clic.Commands{command.Spec.Key: &command}}}
+			cli := clic.CLI{Command: clic.Command{Spec: clic.CommandSpec{Key: "host"}, Commands: clic.Commands{command.Spec.Key: &command}}}
 			result := cli.Run(execution(t), test.args)
 			if result.Error == nil || !strings.Contains(result.Error.Error(), test.contains) {
 				t.Fatalf("Run() error = %v, want containing %q", result.Error, test.contains)
