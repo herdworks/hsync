@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.5.2 (2026-08-13)
+
 * **Added:** `hsync/cli.Command`, a fresh factory for the standalone hsync
   command tree. Hosts can mount or remix the root and leaf commands without
   sharing command state.
