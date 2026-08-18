@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.5.3 (2026-08-18)
+
 * Updated `github.com/herdworks/htup` to v0.27.2 with improve failure reasons
 
 ## v0.5.2 (2026-08-13)
