@@ -6,7 +6,7 @@ go 1.26
 require (
 	github.com/herdworks/clic v0.4.1
 	github.com/herdworks/hq v0.24.0
-	github.com/herdworks/htup v0.27.1
+	github.com/herdworks/htup v0.27.2
 	github.com/herdworks/hypermedia v0.2.0
 )
 
