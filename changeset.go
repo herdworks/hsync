@@ -3,42 +3,38 @@ package hsync
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"path"
 	"strings"
 	"time"
 )
 
-// Changeset is the exact set of hsync files added to a Payload for one
-// publication attempt. Its manifest and index bytes must never be reserialized.
+// Changeset is the exact set of hsync files for one publication attempt. Its
+// sealed manifest and index bytes are never reserialized.
 type Changeset struct {
-	ManifestID    Identifier
-	Manifest      []byte
+	Manifest      Manifest
 	Blobs         map[Identifier][]byte
 	ExpectedIndex []byte
 	PendingIndex  []byte
 	CleanIndex    []byte
 	Instructions  []byte
-
-	syncPath string
-	manifest Manifest
 }
 
-// Apply writes this changeset's exact files below payload. It performs no
-// provider writes and can be called only for a complete, publishable changeset.
-func (changeset Changeset) Apply(payload Payload) error {
-	if payload.Root == "" {
-		return fmt.Errorf("%w: payload root is required", ErrInvalidState)
+// Apply materializes this changeset's exact files below root. It performs no
+// provider writes; callers supply a complete, publishable changeset.
+func (changeset Changeset) Apply(root string) error {
+	if root == "" {
+		return fmt.Errorf("%w: deployment root is required", ErrInvalidState)
 	}
-	if err := changeset.ManifestID.Validate(); err != nil {
+	manifestFilename, err := changeset.Manifest.Filename()
+	if err != nil {
 		return err
 	}
-	if NewIdentifier(changeset.Manifest) != changeset.ManifestID {
-		return fmt.Errorf("%w: manifest %s has mismatched bytes", ErrInvalidState, changeset.ManifestID)
+	indexPath := changeset.Manifest.IndexPath()
+	if indexPath == "" {
+		return fmt.Errorf("%w: changeset index path is required", ErrInvalidState)
 	}
-	if changeset.syncPath == "" {
-		return fmt.Errorf("%w: changeset sync path is required", ErrInvalidState)
-	}
-	syncRelative := strings.TrimPrefix(changeset.syncPath, "/")
+	syncRelative := strings.TrimPrefix(indexPath, "/")
 	syncRoot := path.Dir(syncRelative)
 	if syncRoot == "." {
 		syncRoot = ""
@@ -50,34 +46,32 @@ func (changeset Changeset) Apply(payload Payload) error {
 		if NewIdentifier(contents) != id {
 			return fmt.Errorf("%w: changeset blob %s has mismatched bytes", ErrInvalidState, id)
 		}
-		if err := writePayloadFile(payload.Root, path.Join(syncRoot, "blobs", id.Filename()), contents); err != nil {
+		if err := writePayloadFile(root, path.Join(syncRoot, "blobs", id.Filename()), contents); err != nil {
 			return err
 		}
 	}
-	if err := writePayloadFile(payload.Root, path.Join(syncRoot, "manifests", changeset.ManifestID.Filename()+".json"), changeset.Manifest); err != nil {
+	if err := writePayloadFile(root, path.Join(syncRoot, "manifests", manifestFilename), changeset.Manifest.Raw()); err != nil {
 		return err
 	}
-	if err := writePayloadFile(payload.Root, ".deployment/pending.json", changeset.PendingIndex); err != nil {
+	if err := writePayloadFile(root, ".deployment/pending.json", changeset.PendingIndex); err != nil {
 		return err
 	}
 	if len(changeset.ExpectedIndex) > 0 {
-		if err := writePayloadFile(payload.Root, ".deployment/expected.json", changeset.ExpectedIndex); err != nil {
+		if err := writePayloadFile(root, ".deployment/expected.json", changeset.ExpectedIndex); err != nil {
 			return err
 		}
 	}
-	if err := writePayloadFile(payload.Root, syncRelative, changeset.CleanIndex); err != nil {
+	if err := writePayloadFile(root, syncRelative, changeset.CleanIndex); err != nil {
 		return err
 	}
-	return writePayloadFile(payload.Root, ".deployment.json", changeset.Instructions)
+	return writePayloadFile(root, ".deployment.json", changeset.Instructions)
 }
 
 func completeChangeset(changeset Changeset, observedIndexRaw []byte, now time.Time) (*Changeset, error) {
-	if err := changeset.ManifestID.Validate(); err != nil {
-		return nil, err
+	if !changeset.Manifest.Sealed() {
+		return nil, fmt.Errorf("%w: changeset manifest is not sealed", ErrInvalidState)
 	}
-	if NewIdentifier(changeset.Manifest) != changeset.ManifestID {
-		return nil, fmt.Errorf("%w: manifest %s has mismatched bytes", ErrInvalidState, changeset.ManifestID)
-	}
+	manifestID := changeset.Manifest.ID()
 	for id, contents := range changeset.Blobs {
 		if err := id.Validate(); err != nil {
 			return nil, err
@@ -86,7 +80,7 @@ func completeChangeset(changeset Changeset, observedIndexRaw []byte, now time.Ti
 			return nil, fmt.Errorf("%w: changeset blob %s has mismatched bytes", ErrInvalidState, id)
 		}
 	}
-	pendingIndex, cleanIndex, err := changesetIndexes(changeset.ManifestID, observedIndexRaw, now)
+	pendingIndex, cleanIndex, err := changesetIndexes(manifestID, observedIndexRaw, now)
 	if err != nil {
 		return nil, err
 	}
@@ -98,7 +92,7 @@ func completeChangeset(changeset Changeset, observedIndexRaw []byte, now time.Ti
 	if err != nil {
 		return nil, err
 	}
-	instructions, err := deploymentInstructions(changeset.syncPath, len(observedIndexRaw) > 0)
+	instructions, err := deploymentInstructions(changeset.Manifest.IndexPath(), len(observedIndexRaw) > 0)
 	if err != nil {
 		return nil, err
 	}
@@ -124,7 +118,7 @@ func changesetIndexes(changeset Identifier, observedRaw []byte, now time.Time) (
 	return Index{Version: ManifestVersion, UpdatedAt: now, Published: observed.Published, Pending: changeset, History: history}, Index{Version: ManifestVersion, UpdatedAt: now, Published: changeset, History: history}, nil
 }
 
-func deploymentInstructions(syncPath string, hasExpected bool) ([]byte, error) {
+func deploymentInstructions(indexPath string, hasExpected bool) ([]byte, error) {
 	type precondition struct {
 		Target   string `json:"target"`
 		Expected string `json:"expected,omitempty"`
@@ -135,7 +129,7 @@ func deploymentInstructions(syncPath string, hasExpected bool) ([]byte, error) {
 		Ignore        []string       `json:"ignore"`
 		Enqueue       []string       `json:"enqueue"`
 	}
-	syncRelative := strings.TrimPrefix(syncPath, "/")
+	syncRelative := strings.TrimPrefix(indexPath, "/")
 	syncRoot := path.Dir(syncRelative)
 	manifestPattern := path.Join(syncRoot, "manifests", "*.json")
 	if syncRoot == "." {
@@ -150,4 +144,15 @@ func deploymentInstructions(syncPath string, hasExpected bool) ([]byte, error) {
 		return nil, err
 	}
 	return bytes, nil
+}
+
+func writePayloadFile(root, relative string, contents []byte) error {
+	if err := validateRelativePath(relative); err != nil {
+		return err
+	}
+	filename, err := safeWriteTarget(root, relative)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filename, contents, 0o644)
 }

@@ -4,73 +4,108 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
-	"path/filepath"
 
+	"github.com/google/uuid"
 	"github.com/herdworks/htup"
 	envsecrets "github.com/herdworks/htup/providers/env"
 	_ "github.com/herdworks/htup/providers/git"
 	_ "github.com/herdworks/htup/providers/s3"
 )
 
-// PushOptions selects providers from a generic deployment configuration.
-type PushOptions struct {
-	ConfigPath, Environment string
-	Providers               []string
-	Secrets                 htup.SecretsProviders
+// PushOperation carries the process-specific workflow for a PutOperation.
+type PushOperation struct {
+	PutOperation
 }
 
 // Push reconciles and publishes the repository containing its configuration
-// without requiring an SSG.
-func Push(ctx context.Context, options PushOptions) error {
-	if options.ConfigPath == "" {
-		return fmt.Errorf("deployment config is required")
-	}
-	if options.Environment != "" && len(options.Providers) != 0 {
-		return fmt.Errorf("environment and providers are mutually exclusive")
-	}
-	config, configBytes, err := ReadConfig(options.ConfigPath)
-	if err != nil {
-		return err
-	}
-	if config.Sync == nil {
-		return fmt.Errorf("push requires sync configuration")
-	}
-	if err := config.Sync.Validate(); err != nil {
-		return err
-	}
-	if err := preflightInitialPush(ctx, config.Directory(), *config.Sync); err != nil {
-		return err
-	}
-	var providers htup.HostingProviders
-	if len(options.Providers) != 0 {
-		providers, err = config.Providers.Select(options.Providers)
+// without requiring an SSG, then returns the completed operation.
+func Push(ctx context.Context, directory, configPath, environment string, providers []string, secrets htup.SecretsProviders) (*PushOperation, error) {
+	if directory == "" {
+		var err error
+		directory, err = os.Getwd()
 		if err != nil {
-			return err
+			return nil, err
 		}
 	}
-	secrets := options.Secrets
+	if configPath == "" {
+		var err error
+		configPath, err = DiscoverConfig(directory)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if configPath == "" {
+		return nil, fmt.Errorf("deployment config is required")
+	}
+	config, configBytes, err := ReadConfig(configPath)
+	if err != nil {
+		return nil, err
+	}
+	if config.Sync == nil {
+		return nil, fmt.Errorf("push requires sync configuration")
+	}
+	if err := config.Sync.Validate(); err != nil {
+		return nil, err
+	}
+	if err := preflightInitialPush(ctx, config.Directory(), *config.Sync); err != nil {
+		return nil, err
+	}
 	if secrets == nil {
 		secrets = htup.SecretsProviders{envsecrets.New()}
 	}
-	environment := options.Environment
 	if environment == "" && len(providers) == 0 {
 		environment = DefaultEnvironment
 	}
-	payload, err := snapshotPayload(config.Directory())
-	if err != nil {
+	operation := &PushOperation{PutOperation: PutOperation{
+		Operation: Operation{
+			ID:         uuid.NewString(),
+			Repository: Repository{Root: config.Directory(), Config: config.Sync},
+		},
+		Deployment: &htup.Deployment{
+			ConfigPath:    config.Path,
+			ConfigBytes:   configBytes,
+			ProviderNames: providers,
+			Environment:   environment,
+			Kind:          htup.IncrementalDeployment,
+		},
+		Secrets: secrets,
+	}}
+	if operation.TempDir, err = operation.Repository.prepare(operation.ID); err != nil {
+		return operation, err
+	}
+	defer operation.Operation.cleanup()
+	operation.Deployment.PayloadPath = operation.TempDir
+	return operation, operation.Run(ctx)
+}
+
+func (operation *PushOperation) Run(ctx context.Context) error {
+	if operation == nil || operation.Deployment == nil {
+		return fmt.Errorf("push operation is incomplete")
+	}
+	if operation.Deployment.Status() == htup.DeploymentPending {
+		if err := operation.Prepare(ctx); err != nil {
+			return err
+		}
+	}
+	if err := operation.Deployment.Execute(ctx, operation.Secrets, operation.Writer); err != nil {
 		return err
 	}
-	defer os.RemoveAll(payload)
-	return (&Deployment{ConfigPath: config.Path, ConfigBytes: configBytes, PayloadPath: payload, Providers: providers, Environment: environment, Kind: htup.IncrementalDeployment}).Execute(ctx, secrets, nil)
+	if operation.Changeset == nil {
+		return nil
+	}
+	if err := operation.finalize(ctx); err != nil {
+		return fmt.Errorf("finalize synchronization: %w", err)
+	}
+	return nil
 }
 
 // preflightInitialPush refuses to create even temporary local state for a
-// checkout with no local base when the remote has already been initialized.
-// Sync.Prepare repeats this check as part of its normal race-safe workflow.
+// repository with no local base when the remote has already been initialized.
+// Operation.Prepare repeats this check as part of its normal race-safe workflow.
 func preflightInitialPush(ctx context.Context, root string, config SyncConfig) error {
-	_, _, _, err := (Repository{Root: root}).LoadManifest()
+	repository := Repository{Root: root}
+	err := repository.LoadBase()
 	if err == nil {
 		return nil
 	}
@@ -88,37 +123,11 @@ func preflightInitialPush(ctx context.Context, root string, config SyncConfig) e
 	if err != nil {
 		return err
 	}
-	remote := Remote{BaseURL: &url.URL{Scheme: remoteURL.Scheme, Host: remoteURL.Host}, SyncPath: remoteURL.Path}
+	remote := Remote{IndexURL: remoteURL}
 	if _, err := remote.ReadIndex(ctx); err == nil {
 		return fmt.Errorf("%w: remote index exists but this repository has no local manifest", ErrManualResolution)
 	} else if !errors.Is(err, ErrNotFound) {
-		return fmt.Errorf("read live index: %w", err)
+		return fmt.Errorf("read head index: %w", err)
 	}
 	return nil
-}
-
-func snapshotPayload(root string) (string, error) {
-	state := filepath.Join(root, ".hsync")
-	info, err := os.Lstat(state)
-	if errors.Is(err, os.ErrNotExist) {
-		if err := os.Mkdir(state, 0o755); err != nil {
-			return "", err
-		}
-	} else if err != nil {
-		return "", err
-	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", fmt.Errorf("snapshot state directory must be a regular directory: %s", state)
-	}
-	parent := filepath.Join(state, "snapshot")
-	info, err = os.Lstat(parent)
-	if errors.Is(err, os.ErrNotExist) {
-		if err := os.Mkdir(parent, 0o755); err != nil {
-			return "", err
-		}
-	} else if err != nil {
-		return "", err
-	} else if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return "", fmt.Errorf("snapshot parent must be a regular directory: %s", parent)
-	}
-	return os.MkdirTemp(parent, "")
 }

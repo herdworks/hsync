@@ -2,6 +2,7 @@ package cli
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/herdworks/clic"
 	"github.com/herdworks/hsync"
@@ -88,13 +89,16 @@ func pushValidator(execution *clic.Execution) error {
 
 // push handler
 func pushHandler(execution *clic.Execution) error {
-	filename := execution.Options["config"].StringValue()
-	if filename == "" {
-		var err error
-		filename, err = hsync.DiscoverConfig(execution.WorkingDirectory)
-		if err != nil {
-			return err
+	_, err := hsync.Push(execution.Context, execution.WorkingDirectory, execution.Options["config"].StringValue(), execution.Options["environment"].StringValue(), splitPatterns(execution.Options["providers"].StringValue()), nil)
+	return err
+}
+
+func splitPatterns(value string) []string {
+	var result []string
+	for _, item := range strings.Split(value, ",") {
+		if item = strings.TrimSpace(item); item != "" {
+			result = append(result, item)
 		}
 	}
-	return hsync.Push(execution.Context, hsync.PushOptions{ConfigPath: filename, Environment: execution.Options["environment"].StringValue(), Providers: hsync.SplitPatterns(execution.Options["providers"].StringValue())})
+	return result
 }

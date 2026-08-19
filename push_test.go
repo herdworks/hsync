@@ -118,8 +118,12 @@ func TestPushDeploysOnlyGeneratedSnapshotAndFinalizesInitialManifest(t *testing.
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Push(context.Background(), PushOptions{ConfigPath: configPath}); err != nil {
+	operation, err := Push(context.Background(), "", configPath, "", nil, nil)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if operation.Status != StatusFinalized || operation.Changeset == nil {
+		t.Fatalf("operation = %#v", operation)
 	}
 	for _, path := range pushPayloadEngine.paths {
 		if path == ".git/config" || path == "content/page.txt" || path == "site.yaml" {
@@ -127,17 +131,17 @@ func TestPushDeploysOnlyGeneratedSnapshotAndFinalizesInitialManifest(t *testing.
 		}
 	}
 	if len(pushPayloadEngine.paths) == 0 {
-		t.Fatal("provider received no generated snapshot files")
+		t.Fatal("provider received no generated files")
 	}
 	if _, err := os.Stat(filepath.Join(workspace, LocalManifestPath)); err != nil {
 		t.Fatalf("initial manifest was not finalized: %v", err)
 	}
-	entries, err := os.ReadDir(filepath.Join(workspace, ".hsync", "snapshot"))
+	entries, err := os.ReadDir(filepath.Join(workspace, ".hsync", "tmp"))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(entries) != 0 {
-		t.Fatalf("snapshot staging entries = %#v, want none", entries)
+		t.Fatalf("temporary workspace entries = %#v, want none", entries)
 	}
 }
 
@@ -151,7 +155,7 @@ func TestPushRejectsMissingIncludeBeforeRemoteWrite(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := Push(context.Background(), PushOptions{ConfigPath: configPath}); err == nil {
+	if _, err := Push(context.Background(), "", configPath, "", nil, nil); err == nil {
 		t.Fatal("Push() error = nil without sync.include")
 	}
 	if len(pushPayloadEngine.paths) != 0 {
@@ -176,7 +180,7 @@ func TestPushRejectsRemoteHeadWithoutLocalState(t *testing.T) {
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	err := Push(context.Background(), PushOptions{ConfigPath: configPath})
+	_, err := Push(context.Background(), "", configPath, "", nil, nil)
 	if !errors.Is(err, ErrManualResolution) {
 		t.Fatalf("Push() error = %v, want manual resolution", err)
 	}

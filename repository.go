@@ -8,7 +8,6 @@ import (
 	"os"
 	"path"
 	"path/filepath"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -16,35 +15,49 @@ import (
 	"github.com/herdworks/hypermedia/mimetypes"
 )
 
-// Repository identifies the managed source tree and its one persistent local
-// manifest.
+// Repository identifies the managed source tree, its persistent base, and its
+// ephemeral local workspace state.
 type Repository struct {
 	Root   string
 	Config *SyncConfig
+	Base   Manifest
+	Local  Local
 }
 
-const LocalManifestPath = ".hsync/manifest.json"
+const (
+	LocalManifestPath = ".hsync/manifest.json"
+	stagedFilesPath   = "files"
+)
 
 var reservedPaths = []string{".git/**", ".hsync/**", ".deployment/**"}
 
-// Snapshot contains locally discovered managed entries and their exact blob
-// bytes. Callers write these bytes without re-reading or reserializing them.
-type Snapshot struct {
-	Entries map[string]ManifestEntry
+// Local contains the current selected workspace entries and their exact blob
+// bytes. It is an ephemeral cache refreshed from Repository.Root.
+type Local struct {
+	entries map[string]ManifestEntry
 	Blobs   map[Identifier][]byte
 }
 
 type gitignoreRules struct{ expressions PathExpressions }
 
-func (snapshot *Snapshot) add(entry ManifestEntry, contents []byte) {
-	if snapshot.Entries == nil {
-		snapshot.Entries = make(map[string]ManifestEntry)
+func (local *Local) add(entry ManifestEntry, contents []byte) {
+	if local.entries == nil {
+		local.entries = make(map[string]ManifestEntry)
 	}
-	if snapshot.Blobs == nil {
-		snapshot.Blobs = make(map[Identifier][]byte)
+	if local.Blobs == nil {
+		local.Blobs = make(map[Identifier][]byte)
 	}
-	snapshot.Entries[entry.Path] = entry
-	snapshot.Blobs[entry.Blob] = contents
+	local.entries[entry.Path] = entry
+	local.Blobs[entry.Blob] = contents
+}
+
+func (local Local) Entries() []ManifestEntry {
+	entries := make([]ManifestEntry, 0, len(local.entries))
+	for _, entry := range local.entries {
+		entries = append(entries, entry)
+	}
+	sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
+	return entries
 }
 
 // ChangeKind describes how a selected workspace file differs from its base.
@@ -72,82 +85,112 @@ type RepositoryStatus struct {
 // Initialize writes this repository's new immutable local base manifest. It
 // refuses to replace an existing base, because editing or silently replacing
 // that base would make reconciliation history ambiguous.
-func (repository Repository) Initialize(syncPath string) ([]byte, Identifier, error) {
-	manifest := Manifest{Version: ManifestVersion, SyncPath: syncPath, Entries: []ManifestEntry{}}
-	raw, id, err := SerializeManifest(manifest)
+func (repository *Repository) Initialize(indexPath string) (Manifest, error) {
+	manifest, err := NewSealedManifest(indexPath, "", nil)
 	if err != nil {
-		return nil, "", err
+		return Manifest{}, err
 	}
 	manifestPath, err := repository.manifestTarget(true)
 	if err != nil {
-		return nil, "", err
+		return Manifest{}, err
 	}
 	file, err := os.OpenFile(manifestPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
 	if err != nil {
-		return nil, "", fmt.Errorf("initialize %s: %w", manifestPath, err)
+		return Manifest{}, fmt.Errorf("initialize %s: %w", manifestPath, err)
 	}
-	defer file.Close()
-	if _, err := file.Write(raw); err != nil {
-		return nil, "", fmt.Errorf("write initial manifest: %w", err)
+	if _, err := file.Write(manifest.Raw()); err != nil {
+		file.Close()
+		return Manifest{}, fmt.Errorf("write initial manifest: %w", err)
 	}
-	return raw, id, nil
+	if err := file.Close(); err != nil {
+		return Manifest{}, fmt.Errorf("close initial manifest: %w", err)
+	}
+	repository.Base = manifest
+	repository.Local = Local{}
+	return manifest, nil
 }
 
-// LoadManifest reads and validates this repository's persistent immutable local
-// base.
-func (repository Repository) LoadManifest() ([]byte, Identifier, Manifest, error) {
+// LoadBase loads this repository's persistent base when it is not already cached.
+func (repository *Repository) LoadBase() error {
+	if repository.Base.Sealed() {
+		return nil
+	}
+	_, err := repository.RefreshBase()
+	return err
+}
+
+// RefreshBase reads and validates this repository's current persistent base.
+// It invalidates any cached local workspace state.
+func (repository *Repository) RefreshBase() (Manifest, error) {
 	if repository.Root == "" {
-		return nil, "", Manifest{}, fmt.Errorf("%w: repository root is required for local reads", ErrInvalidState)
+		return Manifest{}, fmt.Errorf("%w: repository root is required for local reads", ErrInvalidState)
 	}
 	manifestPath, err := repository.manifestTarget(false)
 	if err != nil {
-		return nil, "", Manifest{}, err
+		return Manifest{}, err
 	}
 	raw, err := os.ReadFile(manifestPath)
 	if err != nil {
-		return nil, "", Manifest{}, err
+		return Manifest{}, err
 	}
 	id := NewIdentifier(raw)
 	manifest, err := ParseManifest(raw, id)
 	if err != nil {
-		return nil, "", Manifest{}, err
+		return Manifest{}, err
 	}
-	return raw, id, manifest, nil
+	repository.Base = manifest
+	repository.Local = Local{}
+	return repository.Base, nil
+}
+
+// Snapshot scans the selected workspace files using this repository's current
+// base when one is available, replacing its ephemeral Local state.
+func (repository *Repository) Snapshot() error {
+	var base *Manifest
+	if repository.Base.Sealed() {
+		base = &repository.Base
+	}
+	local, err := repository.scanLocal(base)
+	if err != nil {
+		return err
+	}
+	repository.Local = local
+	return nil
 }
 
 // Status reports selected workspace changes from this repository's current
 // immutable base. It reads no remote state and does not modify local files.
-func (repository Repository) Status() (RepositoryStatus, error) {
+func (repository *Repository) Status() (RepositoryStatus, error) {
 	if repository.Root == "" {
 		return RepositoryStatus{}, fmt.Errorf("%w: repository root is required", ErrInvalidState)
 	}
-	_, baseID, base, err := repository.LoadManifest()
+	base, err := repository.RefreshBase()
 	if err != nil {
 		return RepositoryStatus{}, err
 	}
-	workspace, err := repository.snapshot(&base)
-	if err != nil {
+	if err := repository.Snapshot(); err != nil {
 		return RepositoryStatus{}, err
 	}
-	return RepositoryStatus{Base: baseID, Changes: compareWorkspace(base.Entries, workspace.Entries)}, nil
+	return RepositoryStatus{Base: base.ID(), Changes: compareWorkspace(base, repository.Local)}, nil
 }
 
-// Finalize validates the deployed changeset against the clean live index and
+// Finalize validates the deployed changeset against the clean head index and
 // atomically advances this repository's only persistent local state. It must
 // be called only after a deployment has successfully uploaded its final index.
-func (repository Repository) Finalize(changeset Changeset, liveIndexRaw []byte, now time.Time) error {
-	if _, err := ParseManifest(changeset.Manifest, changeset.ManifestID); err != nil {
-		return err
+func (repository *Repository) Finalize(changeset Changeset, headIndexRaw []byte, now time.Time) error {
+	if !changeset.Manifest.Sealed() {
+		return fmt.Errorf("%w: changeset manifest is not sealed", ErrInvalidState)
 	}
-	index, err := ParseIndex(liveIndexRaw)
+	manifestID, manifestRaw := changeset.Manifest.ID(), changeset.Manifest.Raw()
+	index, err := ParseIndex(headIndexRaw)
 	if err != nil {
 		return err
 	}
 	if err := index.PendingError(now); err != nil {
 		return err
 	}
-	if index.Published != changeset.ManifestID {
-		return fmt.Errorf("%w: live index publishes %s, not changeset %s", ErrManualResolution, index.Published, changeset.ManifestID)
+	if index.Published != manifestID {
+		return fmt.Errorf("%w: head index publishes %s, not changeset %s", ErrManualResolution, index.Published, manifestID)
 	}
 	manifestPath, err := repository.manifestTarget(true)
 	if err != nil {
@@ -159,7 +202,7 @@ func (repository Repository) Finalize(changeset Changeset, liveIndexRaw []byte, 
 	}
 	temporaryName := temporary.Name()
 	defer os.Remove(temporaryName)
-	if _, err := temporary.Write(changeset.Manifest); err != nil {
+	if _, err := temporary.Write(manifestRaw); err != nil {
 		temporary.Close()
 		return err
 	}
@@ -170,7 +213,40 @@ func (repository Repository) Finalize(changeset Changeset, liveIndexRaw []byte, 
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	return os.Rename(temporaryName, manifestPath)
+	if err := os.Rename(temporaryName, manifestPath); err != nil {
+		return err
+	}
+	repository.Base = changeset.Manifest
+	repository.Local = Local{}
+	return nil
+}
+
+// commit promotes a complete staged repository from tempDir into this repository.
+func (repository *Repository) commit(tempDir string) error {
+	manifestRaw, err := os.ReadFile(filepath.Join(tempDir, "manifest.json"))
+	if err != nil {
+		return err
+	}
+	manifest, err := ParseManifest(manifestRaw, NewIdentifier(manifestRaw))
+	if err != nil {
+		return err
+	}
+	files := filepath.Join(tempDir, stagedFilesPath)
+	entries, err := os.ReadDir(files)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if err := os.Rename(filepath.Join(files, entry.Name()), filepath.Join(repository.Root, entry.Name())); err != nil {
+			return err
+		}
+	}
+	if err := os.Rename(filepath.Join(tempDir, "manifest.json"), filepath.Join(repository.Root, LocalManifestPath)); err != nil {
+		return err
+	}
+	repository.Base = manifest
+	repository.Local = Local{}
+	return nil
 }
 
 func (repository Repository) manifestTarget(write bool) (string, error) {
@@ -183,123 +259,109 @@ func (repository Repository) manifestTarget(write bool) (string, error) {
 	return safeReadTarget(repository.Root, LocalManifestPath)
 }
 
-// Reconcile applies the lineage-based three-way divergence algorithm to each
-// managed path during repository reconciliation from an immutable base to a
-// verified remote live revision. Both deployment preparation and pull use this
-// single file-selection implementation.
-func (repository Repository) Reconcile(base Manifest, liveID Identifier, continuation Continuation, workspace Snapshot) (Changeset, error) {
-	if err := base.Validate(); err != nil {
-		return Changeset{}, err
+func (repository Repository) exists() (bool, error) {
+	_, err := os.Stat(repository.Root)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
 	}
-	if err := liveID.Validate(); err != nil {
-		return Changeset{}, err
-	}
-	if len(continuation.Revisions) == 0 {
-		return Changeset{}, fmt.Errorf("%w: reconciliation continuation is required", ErrInvalidState)
-	}
-	live := continuation.Revisions[0]
-	if err := live.Validate(); err != nil {
-		return Changeset{}, err
-	}
-	if base.SyncPath != live.SyncPath {
-		return Changeset{}, fmt.Errorf("%w: base and live sync_path differ", ErrManualResolution)
-	}
-	for _, revision := range continuation.Revisions[1:] {
-		if err := revision.Validate(); err != nil {
-			return Changeset{}, err
-		}
-		if revision.SyncPath != live.SyncPath {
-			return Changeset{}, fmt.Errorf("%w: continuation sync_path differs", ErrManualResolution)
-		}
-	}
-
-	baseEntries := entriesByPath(base.Entries)
-	liveEntries := entriesByPath(live.Entries)
-	paths := make(map[string]struct{}, len(baseEntries)+len(liveEntries)+len(workspace.Entries))
-	for name := range baseEntries {
-		paths[name] = struct{}{}
-	}
-	for name := range liveEntries {
-		paths[name] = struct{}{}
-	}
-	for name := range workspace.Entries {
-		paths[name] = struct{}{}
-	}
-	for _, revision := range continuation.Revisions {
-		for name := range entriesByPath(revision.Entries) {
-			paths[name] = struct{}{}
-		}
-	}
-
-	entries := make([]ManifestEntry, 0, len(paths))
-	for name := range paths {
-		baseEntry, baseOK := baseEntries[name]
-		workspaceEntry, workspaceOK := workspace.Entries[name]
-		liveEntry, liveOK := liveEntries[name]
-		selected, ok := mergeEntry(name, baseEntry, baseOK, workspaceEntry, workspaceOK, liveEntry, liveOK, continuation.Revisions)
-		if ok {
-			entries = append(entries, selected)
-		}
-	}
-	sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
-
-	manifest := Manifest{Version: ManifestVersion, Parent: liveID, SyncPath: live.SyncPath, Entries: entries}
-	if err := manifest.Validate(); err != nil {
-		return Changeset{}, err
-	}
-	liveBlobs := make(map[Identifier]struct{}, len(live.Entries))
-	for _, entry := range live.Entries {
-		liveBlobs[entry.Blob] = struct{}{}
-	}
-	blobs := make(map[Identifier][]byte)
-	for _, entry := range entries {
-		if _, ok := liveBlobs[entry.Blob]; ok {
-			continue
-		}
-		contents, ok := workspace.Blobs[entry.Blob]
-		if !ok {
-			return Changeset{}, fmt.Errorf("%w: missing workspace bytes for required blob %s", ErrInvalidState, entry.Blob)
-		}
-		blobs[entry.Blob] = contents
-	}
-	raw, id, err := SerializeManifest(manifest)
 	if err != nil {
-		return Changeset{}, err
+		return false, err
 	}
-	return Changeset{ManifestID: id, Manifest: raw, Blobs: blobs, syncPath: manifest.SyncPath, manifest: manifest}, nil
+	return true, nil
 }
 
-// snapshot assembles a repository snapshot in its canonical order: manifest
+func (repository Repository) isDirectory() (bool, error) {
+	info, err := os.Stat(repository.Root)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return info.IsDir(), nil
+}
+
+func (repository Repository) isEmpty() (bool, error) {
+	entries, err := os.ReadDir(repository.Root)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, entry := range entries {
+		if entry.Name() != ".hsync" {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// prepare creates a named temporary workspace at .hsync/tmp/<id> below this
+// repository's root. It creates the repository root when absent, creates each
+// requested relative subdirectory, and refuses to reuse an active workspace.
+func (repository Repository) prepare(id string, directories ...string) (string, error) {
+	if repository.Root == "" || id == "" || filepath.Base(id) != id {
+		return "", fmt.Errorf("repository root and operation ID are required")
+	}
+	if err := os.MkdirAll(repository.Root, 0o755); err != nil {
+		return "", err
+	}
+	workspace := filepath.Join(repository.Root, ".hsync", "tmp")
+	entries, err := os.ReadDir(workspace)
+	if err == nil {
+		if len(entries) != 0 {
+			return "", fmt.Errorf("repository workspace %q has an active operation", workspace)
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	temporary := filepath.Join(workspace, id)
+	if err := os.MkdirAll(temporary, 0o755); err != nil {
+		return "", err
+	}
+	for _, directory := range directories {
+		if err := validateRelativePath(directory); err != nil {
+			return "", err
+		}
+		if err := os.MkdirAll(filepath.Join(temporary, filepath.FromSlash(directory)), 0o755); err != nil {
+			return "", err
+		}
+	}
+	return temporary, nil
+}
+
+// scanLocal assembles the current local workspace in its canonical order:
 // entries when present, newly discovered included entries, then ignore and
 // size filtering over the complete set. It supports manifest-only mode when
 // Config is nil and discovery-only mode when manifest is nil.
-func (repository Repository) snapshot(manifest *Manifest) (Snapshot, error) {
+func (repository Repository) scanLocal(manifest *Manifest) (Local, error) {
 	var config SyncConfig = SyncConfig{}
 	var policy SyncPolicy
-	var files, discovered Snapshot
+	var files, discovered Local
 	var err error
 	if manifest == nil && repository.Config == nil {
-		return Snapshot{}, fmt.Errorf("%w: snapshot requires a manifest or sync configuration", ErrInvalidState)
+		return Local{}, fmt.Errorf("%w: local scan requires a manifest or sync configuration", ErrInvalidState)
 	}
 	if repository.Config != nil {
 		config = *repository.Config
 	}
 	if policy, err = config.Policy(reservedPaths...); err != nil {
-		return Snapshot{}, err
+		return Local{}, err
 	}
 	if manifest == nil && !policy.includePaths.hasPositive() {
-		return Snapshot{}, fmt.Errorf("%w: initial synchronization requires a positive sync.include path rule", ErrInvalidState)
+		return Local{}, fmt.Errorf("%w: initial synchronization requires a positive sync.include path rule", ErrInvalidState)
 	}
 	gitignore, err := repository.gitignore()
 	if err != nil {
-		return Snapshot{}, err
+		return Local{}, err
 	}
 	if manifest != nil {
-		tracked, err := repository.entries(manifest.Entries)
+		tracked, err := repository.entries(manifest.Entries())
 		if err != nil {
-			return Snapshot{}, err
+			return Local{}, err
 		}
-		for _, entry := range tracked.Entries {
+		for _, entry := range tracked.entries {
 			if policy.Allows(entry) && gitignore.Allows(entry.Path) {
 				files.add(entry, tracked.Blobs[entry.Blob])
 			}
@@ -309,9 +371,9 @@ func (repository Repository) snapshot(manifest *Manifest) (Snapshot, error) {
 		return files, nil // early return
 	}
 	if discovered, err = walk(repository.Root); err != nil {
-		return Snapshot{}, err
+		return Local{}, err
 	}
-	for _, entry := range discovered.Entries {
+	for _, entry := range discovered.entries {
 		if policy.Includes(entry) && policy.Allows(entry) && gitignore.Allows(entry.Path) {
 			files.add(entry, discovered.Blobs[entry.Blob])
 		}
@@ -343,66 +405,30 @@ func (repository Repository) gitignore() (gitignoreRules, error) {
 	return gitignoreRules{expressions: rules}, nil
 }
 
-func (repository Repository) entries(manifestEntries []ManifestEntry) (Snapshot, error) {
-	snapshot := Snapshot{Entries: make(map[string]ManifestEntry), Blobs: make(map[Identifier][]byte)}
+func (repository Repository) entries(manifestEntries []ManifestEntry) (Local, error) {
+	local := Local{entries: make(map[string]ManifestEntry), Blobs: make(map[Identifier][]byte)}
 	for _, base := range manifestEntries {
 		filename := filepath.Join(repository.Root, filepath.FromSlash(base.Path))
 		entry, contents, ok, err := readEntry(filename, base.Path)
 		if err != nil {
-			return Snapshot{}, err
+			return Local{}, err
 		}
 		if !ok {
 			continue
 		}
-		snapshot.add(entry, contents)
+		local.add(entry, contents)
 	}
-	return snapshot, nil
+	return local, nil
 }
 
-func changesetMatchesLive(changeset Changeset, live Manifest) bool {
-	return changeset.manifest.Version == live.Version &&
-		changeset.manifest.SyncPath == live.SyncPath &&
-		reflect.DeepEqual(changeset.manifest.Entries, live.Entries)
-}
-
-func mergeEntry(name string, base ManifestEntry, baseOK bool, workspace ManifestEntry, workspaceOK bool, live ManifestEntry, liveOK bool, history []Manifest) (ManifestEntry, bool) {
-	if entriesEqual(workspace, workspaceOK, base, baseOK) {
-		return live, liveOK
-	}
-	if entriesEqual(workspace, workspaceOK, live, liveOK) {
-		return workspace, workspaceOK
-	}
-	for _, revision := range history {
-		entry, ok := entriesByPath(revision.Entries)[name]
-		if entriesEqual(workspace, workspaceOK, entry, ok) {
-			return live, liveOK
-		}
-	}
-	if entriesEqual(live, liveOK, base, baseOK) {
-		return workspace, workspaceOK
-	}
-	return workspace, workspaceOK
-}
-
-func entriesEqual(left ManifestEntry, leftOK bool, right ManifestEntry, rightOK bool) bool {
-	return leftOK == rightOK && (!leftOK || left.Blob == right.Blob)
-}
-
-func entriesByPath(entries []ManifestEntry) map[string]ManifestEntry {
-	result := make(map[string]ManifestEntry, len(entries))
-	for _, entry := range entries {
-		result[entry.Path] = entry
-	}
-	return result
-}
-
-func compareWorkspace(base []ManifestEntry, workspace map[string]ManifestEntry) []Change {
+func compareWorkspace(base Manifest, local Local) []Change {
 	baseEntries := entriesByPath(base)
-	paths := make(map[string]struct{}, len(baseEntries)+len(workspace))
+	localEntries := entriesByPath(local)
+	paths := make(map[string]struct{}, len(baseEntries)+len(localEntries))
 	for name := range baseEntries {
 		paths[name] = struct{}{}
 	}
-	for name := range workspace {
+	for name := range localEntries {
 		paths[name] = struct{}{}
 	}
 	ordered := make([]string, 0, len(paths))
@@ -413,7 +439,7 @@ func compareWorkspace(base []ManifestEntry, workspace map[string]ManifestEntry) 
 	changes := make([]Change, 0, len(ordered))
 	for _, name := range ordered {
 		baseEntry, baseOK := baseEntries[name]
-		workspaceEntry, workspaceOK := workspace[name]
+		workspaceEntry, workspaceOK := localEntries[name]
 		switch {
 		case !baseOK && workspaceOK:
 			changes = append(changes, Change{Path: name, Kind: ChangeAdded})
@@ -426,8 +452,8 @@ func compareWorkspace(base []ManifestEntry, workspace map[string]ManifestEntry) 
 	return changes
 }
 
-func walk(workspace string) (Snapshot, error) {
-	snapshot := Snapshot{Entries: make(map[string]ManifestEntry), Blobs: make(map[Identifier][]byte)}
+func walk(workspace string) (Local, error) {
+	local := Local{entries: make(map[string]ManifestEntry), Blobs: make(map[Identifier][]byte)}
 	err := filepath.WalkDir(workspace, func(filename string, entry fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -456,13 +482,13 @@ func walk(workspace string) (Snapshot, error) {
 		if !ok {
 			return nil
 		}
-		snapshot.add(candidate, contents)
+		local.add(candidate, contents)
 		return nil
 	})
 	if err != nil {
-		return Snapshot{}, fmt.Errorf("scan workspace: %w", err)
+		return Local{}, fmt.Errorf("scan workspace: %w", err)
 	}
-	return snapshot, nil
+	return local, nil
 }
 
 // readEntry returns one regular, non-symlink workspace file. It is shared by

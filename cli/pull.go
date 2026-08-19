@@ -56,14 +56,10 @@ func pullHandler(execution *clic.Execution) error {
 	if execution.Command.PositionalArguments() == 1 {
 		execution.WorkingDirectory = execution.Command.State.Arguments[0]
 	}
-	config, err := hsync.LoadSyncConfig(execution.WorkingDirectory, execution.Options["config"].StringValue())
+	operation, err := hsync.Pull(execution.Context, execution.WorkingDirectory, execution.Options["config"].StringValue(), execution.Stdout)
 	if err != nil {
 		return err
 	}
-	result, err := hsync.PullWithOptions(execution.Context, config.Directory(), *config.Sync, hsync.PullOptions{Output: execution.Stdout})
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(execution.Stdout, result.ManifestID)
+	_, err = fmt.Fprintln(execution.Stdout, operation.Remote.Head.ID())
 	return err
 }

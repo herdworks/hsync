@@ -2,45 +2,59 @@ package hsync
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 )
 
+func TestCompleteChangesetRejectsUnsealedManifest(t *testing.T) {
+	t.Parallel()
+
+	_, err := completeChangeset(Changeset{Manifest: NewManifest("/.hsync/revision.json", "", nil)}, nil, time.Now())
+	if !errors.Is(err, ErrInvalidState) {
+		t.Fatalf("completeChangeset() error = %v, want invalid state", err)
+	}
+}
+
 func TestChangesetApplyInitializesPendingIndex(t *testing.T) {
 	t.Parallel()
 	build := t.TempDir()
 	blob := []byte("post")
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.hsync/revision.json", Entries: []ManifestEntry{}})
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.hsync/revision.json", entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	changeset, err := completeChangeset(Changeset{Manifest: manifestRaw, ManifestID: manifestID, Blobs: map[Identifier][]byte{NewIdentifier(blob): blob}, syncPath: "/.hsync/revision.json"}, nil, time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC))
+	changeset, err := completeChangeset(Changeset{Manifest: parseTestManifest(t, manifestRaw, manifestID), Blobs: map[Identifier][]byte{NewIdentifier(blob): blob}}, nil, time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := changeset.Apply(Payload{Root: build}); err != nil {
+	if err := changeset.Apply(build); err != nil {
 		t.Fatal(err)
 	}
 	pending, err := ParseIndex(changeset.PendingIndex)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pending.Published != "" || pending.Pending != changeset.ManifestID {
+	if pending.Published != "" || pending.Pending != changeset.Manifest.ID() {
 		t.Fatalf("initial pending = %#v", pending)
 	}
 	if _, err := os.Stat(filepath.Join(build, ".deployment", "expected.json")); !os.IsNotExist(err) {
 		t.Fatalf("expected initial expected.json to be absent, err=%v", err)
 	}
-	if _, err := os.Stat(filepath.Join(build, ".hsync", "manifests", changeset.ManifestID.Filename()+".json")); err != nil {
+	manifestFilename, err := changeset.Manifest.Filename()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(build, ".hsync", "manifests", manifestFilename)); err != nil {
 		t.Fatal(err)
 	}
 	for filename, want := range map[string][]byte{
-		filepath.Join(".hsync", "manifests", changeset.ManifestID.Filename()+".json"): changeset.Manifest,
-		filepath.Join(".deployment", "pending.json"):                                  changeset.PendingIndex,
-		filepath.Join(".hsync", "revision.json"):                                      changeset.CleanIndex,
-		".deployment.json":                                                            changeset.Instructions,
+		filepath.Join(".hsync", "manifests", manifestFilename): changeset.Manifest.Raw(),
+		filepath.Join(".deployment", "pending.json"):           changeset.PendingIndex,
+		filepath.Join(".hsync", "revision.json"):               changeset.CleanIndex,
+		".deployment.json":                                     changeset.Instructions,
 	} {
 		got, err := os.ReadFile(filepath.Join(build, filename))
 		if err != nil {
@@ -73,15 +87,15 @@ func TestChangesetApplyRetainsObservedIndexBytes(t *testing.T) {
 	build := t.TempDir()
 	old := NewIdentifier([]byte("old"))
 	observed := []byte(`{"version":1,"updated_at":"2026-07-30T12:00:00Z","published":"` + old + `","history":["` + old + `"]}`)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	changeset, err := completeChangeset(Changeset{Manifest: manifestRaw, ManifestID: manifestID, Blobs: map[Identifier][]byte{}, syncPath: "/.sync/latest.json"}, observed, time.Date(2026, 7, 30, 12, 1, 0, 0, time.UTC))
+	changeset, err := completeChangeset(Changeset{Manifest: parseTestManifest(t, manifestRaw, manifestID), Blobs: map[Identifier][]byte{}}, observed, time.Date(2026, 7, 30, 12, 1, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := changeset.Apply(Payload{Root: build}); err != nil {
+	if err := changeset.Apply(build); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(build, ".deployment", "expected.json"))

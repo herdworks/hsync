@@ -14,20 +14,29 @@ import (
 	"time"
 )
 
+func writePullConfig(t *testing.T, checkout, remote string) string {
+	t.Helper()
+	configPath := filepath.Join(checkout, "pull.yaml")
+	if err := os.WriteFile(configPath, []byte("sync:\n  remote: "+remote+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return configPath
+}
+
 func TestPullUsesConcurrentDownloadProgress(t *testing.T) {
 	checkout := t.TempDir()
 	before, after := []byte("before"), []byte("after")
-	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
-	baseRaw, baseID, err := SerializeManifest(base)
+	base := Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
+	baseRaw, baseID, err := sealManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
-	liveRaw, liveID, err := SerializeManifest(live)
+	head := Manifest{version: ManifestVersion, parent: baseID, indexPath: base.IndexPath(), entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
+	headRaw, headID, err := sealManifest(head)
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: headID, History: []Identifier{headID, baseID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,8 +44,8 @@ func TestPullUsesConcurrentDownloadProgress(t *testing.T) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
 			_, _ = w.Write(indexRaw)
-		case "/.sync/manifests/" + liveID.Filename() + ".json":
-			_, _ = w.Write(liveRaw)
+		case "/.sync/manifests/" + manifestFilename(headID):
+			_, _ = w.Write(headRaw)
 		case "/.sync/blobs/" + NewIdentifier(after).Filename():
 			_, _ = w.Write(after)
 		default:
@@ -51,15 +60,15 @@ func TestPullUsesConcurrentDownloadProgress(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(control, "manifest.json"), baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckoutFile(checkout, "content/message.txt", before); err != nil {
+	if err := writeRepositoryFile(checkout, "content/message.txt", before); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	result, err := PullWithOptions(context.Background(), checkout, SyncConfig{Remote: server.URL + "/.sync/latest.json"}, PullOptions{Client: server.Client(), Output: &output})
+	result, err := Pull(context.Background(), checkout, writePullConfig(t, checkout, server.URL+"/.sync/latest.json"), &output)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Status != "updated" || result.ManifestID != liveID {
+	if result.Status != "updated" || result.Remote.Head.ID() != headID {
 		t.Fatalf("result = %#v", result)
 	}
 	lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
@@ -82,40 +91,45 @@ func TestPullUsesConcurrentDownloadProgress(t *testing.T) {
 }
 
 func TestPullPlanReportsOnlyDivergentLocalWinsFilesAsSkipped(t *testing.T) {
-	base := Manifest{Entries: []ManifestEntry{
+	base := Manifest{entries: []ManifestEntry{
 		{Path: "conflict.txt", Blob: NewIdentifier([]byte("base"))},
 		{Path: "local.txt", Blob: NewIdentifier([]byte("base"))},
 		{Path: "remote.txt", Blob: NewIdentifier([]byte("base"))},
 	}}
-	live := Manifest{Entries: []ManifestEntry{
+	head := Manifest{entries: []ManifestEntry{
 		{Path: "conflict.txt", Blob: NewIdentifier([]byte("remote"))},
 		{Path: "local.txt", Blob: NewIdentifier([]byte("base"))},
 		{Path: "remote.txt", Blob: NewIdentifier([]byte("remote"))},
 	}}
-	workspace := Snapshot{Entries: map[string]ManifestEntry{
+	workspace := Local{entries: map[string]ManifestEntry{
 		"conflict.txt": {Path: "conflict.txt", Blob: NewIdentifier([]byte("local"))},
 		"local.txt":    {Path: "local.txt", Blob: NewIdentifier([]byte("local"))},
 		"remote.txt":   {Path: "remote.txt", Blob: NewIdentifier([]byte("base"))},
 	}}
-	resolved := Manifest{Entries: []ManifestEntry{
-		workspace.Entries["conflict.txt"], workspace.Entries["local.txt"], live.Entries[2],
+	resolved := Manifest{entries: []ManifestEntry{
+		workspace.entries["conflict.txt"], workspace.entries["local.txt"], head.Entries()[2],
 	}}
-	plan := remoteSelections(base, live, workspace, resolved)
-	if len(plan.skipped) != 1 || plan.skipped[0] != "conflict.txt" {
-		t.Fatalf("skipped = %#v, want [conflict.txt]", plan.skipped)
+	reconciliation := Reconciliation{Diffs: []ReconciliationDiff{
+		{Path: "conflict.txt", Base: manifestEntry(base.Entries()[0], true), Local: manifestEntry(workspace.entries["conflict.txt"], true), Head: manifestEntry(head.Entries()[0], true), Resolved: manifestEntry(resolved.Entries()[0], true)},
+		{Path: "local.txt", Base: manifestEntry(base.Entries()[1], true), Local: manifestEntry(workspace.entries["local.txt"], true), Head: manifestEntry(head.Entries()[1], true), Resolved: manifestEntry(resolved.Entries()[1], true)},
+		{Path: "remote.txt", Base: manifestEntry(base.Entries()[2], true), Local: manifestEntry(workspace.entries["remote.txt"], true), Head: manifestEntry(head.Entries()[2], true), Resolved: manifestEntry(resolved.Entries()[2], true)},
+	}}
+	plan := reconciliation.Plan()
+	if len(plan.Retained) != 1 || plan.Retained[0] != "conflict.txt" {
+		t.Fatalf("retained = %#v, want [conflict.txt]", plan.Retained)
 	}
-	if len(plan.materialize) != 1 || plan.materialize[0].path != "remote.txt" {
-		t.Fatalf("materialize = %#v, want remote.txt", plan.materialize)
+	if len(plan.Writes) != 1 || plan.Writes[0].Path != "remote.txt" {
+		t.Fatalf("writes = %#v, want remote.txt", plan.Writes)
 	}
 }
 
 func TestPullLogsDeletedFiles(t *testing.T) {
 	checkout := t.TempDir()
-	if err := writeCheckoutFile(checkout, "content/removed.txt", []byte("removed")); err != nil {
+	if err := writeRepositoryFile(checkout, "content/removed.txt", []byte("removed")); err != nil {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	if err := materializeRemoteSelections(context.Background(), checkout, nil, []remoteSelection{{path: "content/removed.txt"}}, Remote{}, &output); err != nil {
+	if err := materializeReconciliationPlan(context.Background(), checkout, ReconciliationPlan{Removes: []string{"content/removed.txt"}}, &GetOperation{Operation: Operation{Writer: &output}}); err != nil {
 		t.Fatal(err)
 	}
 	if got, want := output.String(), "file content/removed.txt deleted\n"; got != want {
@@ -128,24 +142,24 @@ func TestPullLogsDeletedFiles(t *testing.T) {
 
 func TestPullAdvancesIntermediateWorkspaceValueToLive(t *testing.T) {
 	checkout := t.TempDir()
-	baseBytes, oldBytes, liveBytes := []byte("version: 1\n"), []byte("version: 2\n"), []byte("version: 10\n")
-	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(baseBytes), Size: int64(len(baseBytes)), Mimetype: "application/yaml"}}}
-	baseRaw, baseID, _ := SerializeManifest(base)
-	middle := Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(oldBytes), Size: int64(len(oldBytes)), Mimetype: "application/yaml"}}}
-	middleRaw, middleID, _ := SerializeManifest(middle)
-	live := Manifest{Version: ManifestVersion, Parent: middleID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(liveBytes), Size: int64(len(liveBytes)), Mimetype: "application/yaml"}}}
-	liveRaw, liveID, _ := SerializeManifest(live)
-	indexRaw, _ := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, middleID, baseID}})
+	baseBytes, oldBytes, headBytes := []byte("version: 1\n"), []byte("version: 2\n"), []byte("version: 10\n")
+	base := Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(baseBytes), Size: int64(len(baseBytes)), Mimetype: "application/yaml"}}}
+	baseRaw, baseID, _ := sealManifest(base)
+	middle := Manifest{version: ManifestVersion, parent: baseID, indexPath: base.IndexPath(), entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(oldBytes), Size: int64(len(oldBytes)), Mimetype: "application/yaml"}}}
+	middleRaw, middleID, _ := sealManifest(middle)
+	head := Manifest{version: ManifestVersion, parent: middleID, indexPath: base.IndexPath(), entries: []ManifestEntry{{Path: "site.yaml", Blob: NewIdentifier(headBytes), Size: int64(len(headBytes)), Mimetype: "application/yaml"}}}
+	headRaw, headID, _ := sealManifest(head)
+	indexRaw, _ := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: headID, History: []Identifier{headID, middleID, baseID}})
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
 			_, _ = w.Write(indexRaw)
-		case "/.sync/manifests/" + liveID.Filename() + ".json":
-			_, _ = w.Write(liveRaw)
-		case "/.sync/manifests/" + middleID.Filename() + ".json":
+		case "/.sync/manifests/" + manifestFilename(headID):
+			_, _ = w.Write(headRaw)
+		case "/.sync/manifests/" + manifestFilename(middleID):
 			_, _ = w.Write(middleRaw)
-		case "/.sync/blobs/" + NewIdentifier(liveBytes).Filename():
-			_, _ = w.Write(liveBytes)
+		case "/.sync/blobs/" + NewIdentifier(headBytes).Filename():
+			_, _ = w.Write(headBytes)
 		default:
 			http.NotFound(w, r)
 		}
@@ -157,35 +171,35 @@ func TestPullAdvancesIntermediateWorkspaceValueToLive(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(checkout, ".hsync", "manifest.json"), baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckoutFile(checkout, "site.yaml", oldBytes); err != nil {
+	if err := writeRepositoryFile(checkout, "site.yaml", oldBytes); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := PullWithOptions(context.Background(), checkout, SyncConfig{Remote: server.URL + "/.sync/latest.json"}, PullOptions{Client: server.Client()}); err != nil {
+	if _, err := Pull(context.Background(), checkout, writePullConfig(t, checkout, server.URL+"/.sync/latest.json"), nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(checkout, "site.yaml"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(got) != string(liveBytes) {
-		t.Fatalf("site.yaml = %q, want %q", got, liveBytes)
+	if string(got) != string(headBytes) {
+		t.Fatalf("site.yaml = %q, want %q", got, headBytes)
 	}
 }
 
 func TestPullFailureDoesNotAdvanceLocalBase(t *testing.T) {
 	checkout := t.TempDir()
 	before, after := []byte("before"), []byte("after")
-	base := Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
-	baseRaw, baseID, err := SerializeManifest(base)
+	base := Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(before), Size: int64(len(before)), Mimetype: "text/plain"}}}
+	baseRaw, baseID, err := sealManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := Manifest{Version: ManifestVersion, Parent: baseID, SyncPath: base.SyncPath, Entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
-	liveRaw, liveID, err := SerializeManifest(live)
+	head := Manifest{version: ManifestVersion, parent: baseID, indexPath: base.IndexPath(), entries: []ManifestEntry{{Path: "content/message.txt", Blob: NewIdentifier(after), Size: int64(len(after)), Mimetype: "text/plain"}}}
+	headRaw, headID, err := sealManifest(head)
 	if err != nil {
 		t.Fatal(err)
 	}
-	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: liveID, History: []Identifier{liveID, baseID}})
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: headID, History: []Identifier{headID, baseID}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,9 +207,9 @@ func TestPullFailureDoesNotAdvanceLocalBase(t *testing.T) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
 			_, _ = w.Write(indexRaw)
-		case "/.sync/manifests/" + liveID.Filename() + ".json":
-			_, _ = w.Write(liveRaw)
-		case "/.sync/manifests/" + baseID.Filename() + ".json":
+		case "/.sync/manifests/" + manifestFilename(headID):
+			_, _ = w.Write(headRaw)
+		case "/.sync/manifests/" + manifestFilename(baseID):
 			_, _ = w.Write(baseRaw)
 		case "/.sync/blobs/" + NewIdentifier(after).Filename():
 			_, _ = w.Write([]byte("corrupt"))
@@ -211,10 +225,10 @@ func TestPullFailureDoesNotAdvanceLocalBase(t *testing.T) {
 	if err := os.WriteFile(manifestPath, baseRaw, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := writeCheckoutFile(checkout, "content/message.txt", before); err != nil {
+	if err := writeRepositoryFile(checkout, "content/message.txt", before); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Pull(context.Background(), checkout, SyncConfig{Remote: server.URL + "/.sync/latest.json"}, server.Client()); err == nil {
+	if _, err := Pull(context.Background(), checkout, writePullConfig(t, checkout, server.URL+"/.sync/latest.json"), nil); err == nil {
 		t.Fatal("Pull() error = nil for corrupt blob")
 	}
 	got, err := os.ReadFile(manifestPath)

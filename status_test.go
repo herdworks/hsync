@@ -11,15 +11,15 @@ func TestRepositoryStatus(t *testing.T) {
 	workspace := t.TempDir()
 	config := &SyncConfig{Include: Rules{Paths: []string{"added.txt", "deleted.txt", "modified.txt", "unchanged.txt"}}}
 	base := Manifest{
-		Version:  ManifestVersion,
-		SyncPath: "/.sync/latest.json",
-		Entries: []ManifestEntry{
+		version:   ManifestVersion,
+		indexPath: "/.sync/latest.json",
+		entries: []ManifestEntry{
 			{Path: "deleted.txt", Blob: NewIdentifier([]byte("deleted")), Size: 7, Mimetype: "text/plain"},
 			{Path: "modified.txt", Blob: NewIdentifier([]byte("before")), Size: 6, Mimetype: "text/plain"},
 			{Path: "unchanged.txt", Blob: NewIdentifier([]byte("same")), Size: 4, Mimetype: "text/plain"},
 		},
 	}
-	raw, id, err := SerializeManifest(base)
+	raw, id, err := sealManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,8 @@ func TestRepositoryStatus(t *testing.T) {
 		}
 	}
 
-	result, err := (Repository{Root: workspace, Config: config}).Status()
+	repository := Repository{Root: workspace, Config: config}
+	result, err := repository.Status()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,10 +61,10 @@ func TestRepositoryStatus(t *testing.T) {
 func TestRepositoryStatusWithoutIncludeTracksOnlyManifestEntries(t *testing.T) {
 	workspace := t.TempDir()
 	base := Manifest{
-		Version: ManifestVersion, SyncPath: "/.sync/latest.json",
-		Entries: []ManifestEntry{{Path: "tracked.txt", Blob: NewIdentifier([]byte("before")), Size: 6, Mimetype: "text/plain"}},
+		version: ManifestVersion, indexPath: "/.sync/latest.json",
+		entries: []ManifestEntry{{Path: "tracked.txt", Blob: NewIdentifier([]byte("before")), Size: 6, Mimetype: "text/plain"}},
 	}
-	raw, _, err := SerializeManifest(base)
+	raw, _, err := sealManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -81,7 +82,8 @@ func TestRepositoryStatusWithoutIncludeTracksOnlyManifestEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := (Repository{Root: workspace, Config: &SyncConfig{}}).Status()
+	repository := Repository{Root: workspace, Config: &SyncConfig{}}
+	result, err := repository.Status()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,10 +96,10 @@ func TestRepositoryStatusWithoutIncludeTracksOnlyManifestEntries(t *testing.T) {
 func TestRepositoryStatusAppliesIgnoreToManifestEntries(t *testing.T) {
 	workspace := t.TempDir()
 	base := Manifest{
-		Version: ManifestVersion, SyncPath: "/.sync/latest.json",
-		Entries: []ManifestEntry{{Path: "secret.txt", Blob: NewIdentifier([]byte("before")), Size: 6, Mimetype: "text/plain"}},
+		version: ManifestVersion, indexPath: "/.sync/latest.json",
+		entries: []ManifestEntry{{Path: "secret.txt", Blob: NewIdentifier([]byte("before")), Size: 6, Mimetype: "text/plain"}},
 	}
-	raw, _, err := SerializeManifest(base)
+	raw, _, err := sealManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,10 +114,11 @@ func TestRepositoryStatusAppliesIgnoreToManifestEntries(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := (Repository{
+	repository := Repository{
 		Root:   workspace,
 		Config: &SyncConfig{Ignore: Rules{Paths: []string{"secret.txt"}}},
-	}).Status()
+	}
+	result, err := repository.Status()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -128,10 +131,10 @@ func TestRepositoryStatusAppliesIgnoreToManifestEntries(t *testing.T) {
 func TestRepositoryStatusRetainsManifestEntriesOutsideInclude(t *testing.T) {
 	workspace := t.TempDir()
 	base := Manifest{
-		Version: ManifestVersion, SyncPath: "/.sync/latest.json",
-		Entries: []ManifestEntry{{Path: "tracked.txt", Blob: NewIdentifier([]byte("tracked")), Size: 7, Mimetype: "text/plain"}},
+		version: ManifestVersion, indexPath: "/.sync/latest.json",
+		entries: []ManifestEntry{{Path: "tracked.txt", Blob: NewIdentifier([]byte("tracked")), Size: 7, Mimetype: "text/plain"}},
 	}
-	raw, _, err := SerializeManifest(base)
+	raw, _, err := sealManifest(base)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,10 +155,11 @@ func TestRepositoryStatusRetainsManifestEntriesOutsideInclude(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result, err := (Repository{
+	repository := Repository{
 		Root:   workspace,
 		Config: &SyncConfig{Include: Rules{Paths: []string{"content/**"}}},
-	}).Status()
+	}
+	result, err := repository.Status()
 	if err != nil {
 		t.Fatal(err)
 	}

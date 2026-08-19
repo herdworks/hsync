@@ -13,78 +13,76 @@ import (
 	"time"
 )
 
-// ResetOptions controls optional reset behavior.
-type ResetOptions struct {
-	Output      io.Writer
-	Input       io.Reader
+// ResetOperation restores selected entries from a repository's local base
+// manifest without changing that base or the remote index.
+type ResetOperation struct {
+	GetOperation
+	Reader      io.Reader
 	Interactive bool
+	Files       int
 }
 
-// ResetResult describes restoration of files from the repository's local base.
-type ResetResult struct {
-	ManifestID Identifier
-	Status     string
-	Files      int
-}
-
-// Reset restores missing or modified files tracked by the local manifest. It
-// never reads the remote index, changes the local manifest, or removes files
-// absent from the manifest.
-func (repository Repository) Reset(ctx context.Context, remote Remote, options ResetOptions) (ResetResult, error) {
-	if repository.Root == "" {
-		return ResetResult{}, fmt.Errorf("%w: repository root is required", ErrInvalidState)
+// Run restores selected files tracked by the repository's local base manifest.
+// It never reads the remote index, changes the local manifest, or removes
+// files absent from that manifest.
+func (operation *ResetOperation) Run(ctx context.Context) error {
+	if operation == nil || operation.Repository.Root == "" {
+		return fmt.Errorf("%w: repository root is required", ErrInvalidState)
 	}
-	_, manifestID, manifest, err := repository.LoadManifest()
+	if err := operation.Repository.LoadBase(); err != nil {
+		return err
+	}
+	entries, err := operation.Repository.resetCandidates(operation.Repository.Base.Entries())
 	if err != nil {
-		return ResetResult{}, err
+		return err
 	}
-	candidates, err := repository.resetCandidates(manifest.Entries)
+	if len(entries) == 0 {
+		operation.Status = StatusNoop
+		return nil
+	}
+	entries, err = selectResetEntries(entries, operation.Reader, operation.Interactive, operation.Writer)
 	if err != nil {
-		return ResetResult{}, err
+		return err
 	}
-	if len(candidates) == 0 {
-		return ResetResult{ManifestID: manifestID, Status: "noop"}, nil
+	if len(entries) == 0 {
+		operation.Status = StatusNoop
+		return nil
 	}
-	accepted, err := selectResetEntries(candidates, options)
-	if err != nil {
-		return ResetResult{}, err
-	}
-	if len(accepted) == 0 {
-		return ResetResult{ManifestID: manifestID, Status: "noop"}, nil
-	}
-	if err := writeDownloadProgress(options.Output, "downloading %d files (%s)", len(accepted), humanSize(entriesSize(accepted))); err != nil {
-		return ResetResult{}, err
+	if err := operation.log("downloading %d files (%s)", len(entries), humanSize(entriesSize(entries))); err != nil {
+		return err
 	}
 	staging, err := os.MkdirTemp("", "hsync-reset-")
 	if err != nil {
-		return ResetResult{}, err
+		return err
 	}
 	defer os.RemoveAll(staging)
 	started := time.Now()
-	if err := downloadEntries(ctx, staging, remote, accepted, options.Output); err != nil {
-		return ResetResult{}, err
+	if err := operation.getEntries(ctx, staging, entries); err != nil {
+		return err
 	}
-	targets := make(map[string]string, len(accepted))
-	for _, entry := range accepted {
-		target, err := safeWriteTarget(repository.Root, entry.Path)
+	targets := make(map[string]string, len(entries))
+	for _, entry := range entries {
+		target, err := safeWriteTarget(operation.Repository.Root, entry.Path)
 		if err != nil {
-			return ResetResult{}, err
+			return err
 		}
 		targets[entry.Path] = target
 	}
-	for _, entry := range accepted {
+	for _, entry := range entries {
 		contents, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(entry.Path)))
 		if err != nil {
-			return ResetResult{}, err
+			return err
 		}
-		if err := writeResetFile(repository.Root, targets[entry.Path], contents); err != nil {
-			return ResetResult{}, err
+		if err := writeResetFile(operation.Repository.Root, targets[entry.Path], contents); err != nil {
+			return err
 		}
 	}
-	if err := writeDownloadProgress(options.Output, "downloaded %d files in %.3f seconds", len(accepted), time.Since(started).Seconds()); err != nil {
-		return ResetResult{}, err
+	if err := operation.log("downloaded %d files in %.3f seconds", len(entries), time.Since(started).Seconds()); err != nil {
+		return err
 	}
-	return ResetResult{ManifestID: manifestID, Status: "reset", Files: len(accepted)}, nil
+	operation.Files = len(entries)
+	operation.Status = StatusReset
+	return nil
 }
 
 func (repository Repository) resetCandidates(entries []ManifestEntry) ([]ManifestEntry, error) {
@@ -114,22 +112,37 @@ func (repository Repository) resetCandidates(entries []ManifestEntry) ([]Manifes
 	return candidates, nil
 }
 
-func selectResetEntries(candidates []ManifestEntry, options ResetOptions) ([]ManifestEntry, error) {
-	if !options.Interactive {
+// Reset loads or discovers synchronization configuration, constructs and runs
+// a ResetOperation, then returns it.
+func Reset(ctx context.Context, directory, configPath string, writer io.Writer, input io.Reader, interactive bool) (*ResetOperation, error) {
+	config, err := LoadSyncConfig(directory, configPath)
+	if err != nil {
+		return nil, err
+	}
+	repository, remote, err := openConfiguredRepository(config.Directory(), *config.Sync, nil)
+	if err != nil {
+		return nil, err
+	}
+	operation := &ResetOperation{GetOperation: GetOperation{
+		Operation: Operation{Repository: repository, Remote: remote, Writer: writer},
+	}, Reader: input, Interactive: interactive}
+	return operation, operation.Run(ctx)
+}
+
+func selectResetEntries(candidates []ManifestEntry, input io.Reader, interactive bool, writer io.Writer) ([]ManifestEntry, error) {
+	if !interactive {
 		return candidates, nil
 	}
-	input := options.Input
 	if input == nil {
 		input = os.Stdin
 	}
-	output := options.Output
-	if output == nil {
-		output = os.Stdout
+	if writer == nil {
+		writer = os.Stdout
 	}
 	reader := bufio.NewReader(input)
 	accepted := make([]ManifestEntry, 0, len(candidates))
 	for _, entry := range candidates {
-		if _, err := fmt.Fprintf(output, "file %s reset? [y/N] ", entry.Path); err != nil {
+		if _, err := fmt.Fprintf(writer, "file %s reset? [y/N] ", entry.Path); err != nil {
 			return nil, err
 		}
 		answer, err := reader.ReadString('\n')
@@ -140,7 +153,7 @@ func selectResetEntries(candidates []ManifestEntry, options ResetOptions) ([]Man
 			accepted = append(accepted, entry)
 			continue
 		}
-		if _, err := fmt.Fprintf(output, "file %s skipped\n", entry.Path); err != nil {
+		if _, err := fmt.Fprintf(writer, "file %s skipped\n", entry.Path); err != nil {
 			return nil, err
 		}
 	}

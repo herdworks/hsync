@@ -30,14 +30,3 @@ func ParseSize(value string) (int64, error) {
 	}
 	return 0, fmt.Errorf("invalid file size %q", value)
 }
-
-// SplitPatterns parses a comma-separated list used by the init command.
-func SplitPatterns(value string) []string {
-	var result []string
-	for _, item := range strings.Split(value, ",") {
-		if item = strings.TrimSpace(item); item != "" {
-			result = append(result, item)
-		}
-	}
-	return result
-}

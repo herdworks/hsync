@@ -38,10 +38,10 @@ func downloadHandler(execution *clic.Execution) error {
 	if err != nil || source.Scheme == "" || source.Host == "" {
 		return fmt.Errorf("invalid URL %q", execution.Command.State.Arguments[0])
 	}
-	result, err := hsync.DownloadWithOptions(execution.Context, source, execution.Command.State.Arguments[1], hsync.DownloadOptions{Output: execution.Stdout})
+	operation, err := hsync.Download(execution.Context, source, execution.Command.State.Arguments[1], nil, execution.Stdout)
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(execution.Stdout, result.ManifestID)
+	_, err = fmt.Fprintln(execution.Stdout, operation.Remote.Head.ID())
 	return err
 }

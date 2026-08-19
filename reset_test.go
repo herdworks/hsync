@@ -3,9 +3,9 @@ package hsync
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +23,7 @@ func TestRepositoryResetRestoresTrackedFilesAndPreservesUntracked(t *testing.T) 
 	remote, requests, closeServer := resetRemote(t, map[Identifier][]byte{entry.Blob: contents})
 	defer closeServer()
 	var output bytes.Buffer
-	result, err := repository.Reset(context.Background(), remote, ResetOptions{Output: &output})
+	result, err := runReset(context.Background(), repository, remote, &output, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestRepositoryResetInteractiveDeclinesAndAcceptsInPathOrder(t *testing.T) {
 	remote, _, closeServer := resetRemote(t, map[Identifier][]byte{entries[0].Blob: second, entries[1].Blob: first})
 	defer closeServer()
 	var output bytes.Buffer
-	_, err := repository.Reset(context.Background(), remote, ResetOptions{Interactive: true, Input: strings.NewReader("n\ny\n"), Output: &output})
+	_, err := runReset(context.Background(), repository, remote, &output, strings.NewReader("n\ny\n"), true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestRepositoryResetRejectsSymlinkWithoutChangingOtherFiles(t *testing.T) {
 	}
 	remote, _, closeServer := resetRemote(t, map[Identifier][]byte{entries[0].Blob: first, entries[1].Blob: second})
 	defer closeServer()
-	if _, err := repository.Reset(context.Background(), remote, ResetOptions{}); err == nil {
+	if _, err := runReset(context.Background(), repository, remote, nil, nil, false); err == nil {
 		t.Fatal("Reset() error = nil for symlink target")
 	}
 	if got, _ := os.ReadFile(filepath.Join(checkout, "first.txt")); string(got) != "old" {
@@ -111,7 +111,7 @@ func TestRepositoryResetRejectsSymlinkAncestorBeforeCreatingDirectories(t *testi
 	}
 	remote, _, closeServer := resetRemote(t, map[Identifier][]byte{entry.Blob: contents})
 	defer closeServer()
-	if _, err := repository.Reset(context.Background(), remote, ResetOptions{}); err == nil {
+	if _, err := runReset(context.Background(), repository, remote, nil, nil, false); err == nil {
 		t.Fatal("Reset() error = nil for symlink ancestor")
 	}
 	if _, err := os.Stat(filepath.Join(outside, "tracked.txt")); !os.IsNotExist(err) {
@@ -127,7 +127,7 @@ func TestRepositoryResetVerificationFailureLeavesWorkspaceUntouched(t *testing.T
 	writeResetTestFile(t, checkout, entry.Path, []byte("local"))
 	remote, _, closeServer := resetRemote(t, map[Identifier][]byte{entry.Blob: []byte("wrong")})
 	defer closeServer()
-	if _, err := repository.Reset(context.Background(), remote, ResetOptions{}); err == nil {
+	if _, err := runReset(context.Background(), repository, remote, nil, nil, false); err == nil {
 		t.Fatal("Reset() error = nil for mismatched blob")
 	}
 	if got, _ := os.ReadFile(filepath.Join(checkout, entry.Path)); string(got) != "local" {
@@ -141,7 +141,7 @@ func TestRepositoryResetNoopDoesNotReadRemote(t *testing.T) {
 	entry := ManifestEntry{Path: "tracked.txt", Blob: NewIdentifier(contents), Size: int64(len(contents)), Mimetype: "text/plain"}
 	repository := writeResetManifest(t, checkout, []ManifestEntry{entry})
 	writeResetTestFile(t, checkout, entry.Path, contents)
-	result, err := repository.Reset(context.Background(), Remote{}, ResetOptions{})
+	result, err := runReset(context.Background(), repository, Remote{}, nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,7 +152,7 @@ func TestRepositoryResetNoopDoesNotReadRemote(t *testing.T) {
 
 func writeResetManifest(t *testing.T, root string, entries []ManifestEntry) Repository {
 	t.Helper()
-	raw, _, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: entries})
+	raw, _, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: entries})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,6 +165,11 @@ func writeResetManifest(t *testing.T, root string, entries []ManifestEntry) Repo
 		t.Fatal(err)
 	}
 	return Repository{Root: root}
+}
+
+func runReset(ctx context.Context, repository Repository, remote Remote, writer io.Writer, reader io.Reader, interactive bool) (*ResetOperation, error) {
+	operation := &ResetOperation{GetOperation: GetOperation{Operation: Operation{Repository: repository, Remote: remote, Writer: writer}}, Reader: reader, Interactive: interactive}
+	return operation, operation.Run(ctx)
 }
 
 func writeResetTestFile(t *testing.T, root, relative string, contents []byte) {
@@ -194,9 +199,7 @@ func resetRemote(t *testing.T, blobs map[Identifier][]byte) (Remote, *[]string, 
 		}
 		http.NotFound(w, r)
 	}))
-	base, err := url.Parse(server.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return Remote{BaseURL: base, Client: server.Client(), SyncPath: "/.sync/latest.json"}, &requests, server.Close
+	remote := testRemote(t, server.URL, "/.sync/latest.json")
+	remote.Client = server.Client()
+	return remote, &requests, server.Close
 }

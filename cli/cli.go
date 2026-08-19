@@ -37,7 +37,7 @@ func Command() clic.Command {
 	}
 }
 
-// GlobalConfigOption returns the reusable --config option for existing checkouts.
+// GlobalConfigOption returns the reusable --config option for existing repositories.
 func GlobalConfigOption() clic.Option {
 	return clic.Option{
 		Meta: clic.OptionMeta{

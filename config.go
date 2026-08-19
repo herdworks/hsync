@@ -42,7 +42,7 @@ type Rules struct {
 	Mimetypes []string `json:"mimetypes,omitempty" yaml:"mimetypes,omitempty"`
 }
 
-// SyncPolicy is the evaluated file-selection policy for one local snapshot.
+// SyncPolicy is the evaluated file-selection policy for one local workspace.
 type SyncPolicy struct {
 	includePaths PathExpressions
 	includeTypes []string
@@ -108,7 +108,7 @@ func (config SyncConfig) RemoteURL() (*url.URL, error) {
 	if remote.Path == "" || remote.Path == "/" {
 		remote.Path = DefaultIndexPath
 	}
-	if err := validateSyncPath(remote.Path); err != nil {
+	if err := validateIndexPath(remote.Path); err != nil {
 		return nil, fmt.Errorf("sync remote path: %w", err)
 	}
 	return remote, nil
@@ -161,7 +161,7 @@ func (config SyncConfig) Policy(reserved ...string) (SyncPolicy, error) {
 }
 
 func (SyncConfig) JSONSchemaTitle() string {
-	return "HyperSync configuration"
+	return "hsync configuration"
 }
 func (SyncConfig) JSONSchemaName() string { return "sync" }
 func (SyncConfig) JSONSchemaSummary() string {
@@ -209,7 +209,7 @@ func (policy SyncPolicy) ScanningEnabled() bool {
 }
 
 func (Rules) JSONSchemaTitle() string {
-	return "HyperSync rules"
+	return "hsync rules"
 }
 func (Rules) JSONSchemaName() string    { return "sync-rules" }
 func (Rules) JSONSchemaSummary() string { return "Optional synchronization path and MIME type rules." }

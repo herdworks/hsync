@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -20,7 +21,7 @@ import (
 func TestDownloadDirectAndDiscoveredIndex(t *testing.T) {
 	contents := []byte("hello from sync")
 	blob := NewIdentifier(contents)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "data/message.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain; charset=utf-8"}}})
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{{Path: "data/message.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain; charset=utf-8"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +33,7 @@ func TestDownloadDirectAndDiscoveredIndex(t *testing.T) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
 			_, _ = w.Write(indexRaw)
-		case "/.sync/manifests/" + manifestID.Filename() + ".json":
+		case "/.sync/manifests/" + manifestFilename(manifestID):
 			_, _ = w.Write(manifestRaw)
 		case "/.sync/blobs/" + blob.Filename():
 			_, _ = w.Write(contents)
@@ -51,15 +52,15 @@ func TestDownloadDirectAndDiscoveredIndex(t *testing.T) {
 				t.Fatal(err)
 			}
 			var output bytes.Buffer
-			result, err := DownloadWithOptions(context.Background(), u, destination, DownloadOptions{Client: server.Client(), Output: &output})
+			result, err := Download(context.Background(), u, destination, server.Client(), &output)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result.Status != "downloaded" || result.ManifestID != manifestID {
+			if result.Status != "downloaded" || result.Remote.Head.ID() != manifestID {
 				t.Fatalf("result = %#v", result)
 			}
-			if result.IndexURL == nil || result.IndexURL.String() != server.URL+"/.sync/latest.json" {
-				t.Fatalf("index URL = %v", result.IndexURL)
+			if result.Remote.IndexURL == nil || result.Remote.IndexURL.String() != server.URL+"/.sync/latest.json" {
+				t.Fatalf("index URL = %v", result.Remote.IndexURL)
 			}
 			lines := strings.Split(strings.TrimSuffix(output.String(), "\n"), "\n")
 			wantOutput := []string{
@@ -80,6 +81,13 @@ func TestDownloadDirectAndDiscoveredIndex(t *testing.T) {
 			if _, err := os.Stat(filepath.Join(destination, ".hsync", "manifest.json")); err != nil {
 				t.Fatal(err)
 			}
+			temporaryEntries, err := os.ReadDir(filepath.Join(destination, ".hsync", "tmp"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(temporaryEntries) != 0 {
+				t.Fatalf("download left temporary jobs: %#v", temporaryEntries)
+			}
 			if _, err := os.Stat(filepath.Join(destination, ".hsync", "remote.json")); !os.IsNotExist(err) {
 				t.Fatalf("download created remote metadata: %v", err)
 			}
@@ -88,7 +96,7 @@ func TestDownloadDirectAndDiscoveredIndex(t *testing.T) {
 }
 
 func TestDownloadRootPrefersStandardIndexAndDoesNotFallbackFromExplicitPath(t *testing.T) {
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: DefaultIndexPath, Entries: []ManifestEntry{}})
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: DefaultIndexPath, entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +110,7 @@ func TestDownloadRootPrefersStandardIndexAndDoesNotFallbackFromExplicitPath(t *t
 		switch r.URL.Path {
 		case DefaultIndexPath:
 			_, _ = w.Write(indexRaw)
-		case "/.hsync/manifests/" + manifestID.Filename() + ".json":
+		case "/.hsync/manifests/" + manifestFilename(manifestID):
 			_, _ = w.Write(manifestRaw)
 		case "/":
 			_, _ = w.Write([]byte(`<link rel="https://hsync.sh" href="/custom/index.json">`))
@@ -116,12 +124,12 @@ func TestDownloadRootPrefersStandardIndexAndDoesNotFallbackFromExplicitPath(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	result, err := Download(context.Background(), root, filepath.Join(t.TempDir(), "checkout"), server.Client())
+	result, err := Download(context.Background(), root, filepath.Join(t.TempDir(), "checkout"), server.Client(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.IndexURL.Path != DefaultIndexPath {
-		t.Fatalf("root download index = %q, want %q", result.IndexURL.Path, DefaultIndexPath)
+	if result.Remote.IndexURL.Path != DefaultIndexPath {
+		t.Fatalf("root download index = %q, want %q", result.Remote.IndexURL.Path, DefaultIndexPath)
 	}
 	for _, request := range requests {
 		if request == "/" {
@@ -133,7 +141,7 @@ func TestDownloadRootPrefersStandardIndexAndDoesNotFallbackFromExplicitPath(t *t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Download(context.Background(), explicit, filepath.Join(t.TempDir(), "missing"), server.Client()); err == nil {
+	if _, err := Download(context.Background(), explicit, filepath.Join(t.TempDir(), "missing"), server.Client(), nil); err == nil {
 		t.Fatal("Download() error = nil for an unavailable explicit index")
 	}
 }
@@ -142,7 +150,7 @@ func TestDownloadFetchesBlobsConcurrently(t *testing.T) {
 	first := []byte("first")
 	second := []byte("second")
 	firstID, secondID := NewIdentifier(first), NewIdentifier(second)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{
 		{Path: "first.txt", Blob: firstID, Size: int64(len(first)), Mimetype: "text/plain"},
 		{Path: "second.txt", Blob: secondID, Size: int64(len(second)), Mimetype: "text/plain"},
 	}})
@@ -162,7 +170,7 @@ func TestDownloadFetchesBlobsConcurrently(t *testing.T) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
 			_, _ = w.Write(indexRaw)
-		case "/.sync/manifests/" + manifestID.Filename() + ".json":
+		case "/.sync/manifests/" + manifestFilename(manifestID):
 			_, _ = w.Write(manifestRaw)
 		case "/.sync/blobs/" + firstID.Filename(), "/.sync/blobs/" + secondID.Filename():
 			started <- struct{}{}
@@ -184,7 +192,7 @@ func TestDownloadFetchesBlobsConcurrently(t *testing.T) {
 	results := make(chan error, 1)
 	destination := filepath.Join(t.TempDir(), "checkout")
 	go func() {
-		_, err := Download(context.Background(), source, destination, server.Client())
+		_, err := Download(context.Background(), source, destination, server.Client(), nil)
 		results <- err
 	}()
 	for range 2 {
@@ -203,7 +211,7 @@ func TestDownloadFetchesBlobsConcurrently(t *testing.T) {
 func TestDownloadPublishesIntoExistingEmptyDirectory(t *testing.T) {
 	contents := []byte("published")
 	blob := NewIdentifier(contents)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain"}}})
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +223,7 @@ func TestDownloadPublishesIntoExistingEmptyDirectory(t *testing.T) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
 			_, _ = w.Write(indexRaw)
-		case "/.sync/manifests/" + manifestID.Filename() + ".json":
+		case "/.sync/manifests/" + manifestFilename(manifestID):
 			_, _ = w.Write(manifestRaw)
 		case "/.sync/blobs/" + blob.Filename():
 			_, _ = w.Write(contents)
@@ -232,7 +240,7 @@ func TestDownloadPublishesIntoExistingEmptyDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Download(context.Background(), source, destination, server.Client()); err != nil {
+	if _, err := Download(context.Background(), source, destination, server.Client(), nil); err != nil {
 		t.Fatal(err)
 	}
 	got, err := os.ReadFile(filepath.Join(destination, "content", "page.txt"))
@@ -244,10 +252,10 @@ func TestDownloadPublishesIntoExistingEmptyDirectory(t *testing.T) {
 	}
 }
 
-func TestDownloadFailureLeavesExistingEmptyDirectoryUntouched(t *testing.T) {
-	contents := []byte("incorrect size")
+func TestDownloadPublishesIntoCurrentDirectory(t *testing.T) {
+	contents := []byte("published")
 	blob := NewIdentifier(contents)
-	manifestRaw, manifestID, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents) + 1), Mimetype: "text/plain"}}})
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents)), Mimetype: "text/plain"}}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +267,87 @@ func TestDownloadFailureLeavesExistingEmptyDirectoryUntouched(t *testing.T) {
 		switch r.URL.Path {
 		case "/.sync/latest.json":
 			_, _ = w.Write(indexRaw)
-		case "/.sync/manifests/" + manifestID.Filename() + ".json":
+		case "/.sync/manifests/" + manifestFilename(manifestID):
+			_, _ = w.Write(manifestRaw)
+		case "/.sync/blobs/" + blob.Filename():
+			_, _ = w.Write(contents)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	workingDirectory := t.TempDir()
+	previousDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(workingDirectory); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previousDirectory); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+	source, err := url.Parse(server.URL + "/.sync/latest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Download(context.Background(), source, ".", server.Client(), nil); err != nil {
+		t.Fatal(err)
+	}
+	got, err := os.ReadFile(filepath.Join("content", "page.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(contents) {
+		t.Fatalf("downloaded contents = %q, want %q", got, contents)
+	}
+}
+
+func TestSafeWriteTargetCreatesSharedParentsConcurrently(t *testing.T) {
+	const workers = 8
+	for range 20 {
+		root := t.TempDir()
+		start := make(chan struct{})
+		errors := make(chan error, workers)
+		var group sync.WaitGroup
+		for index := range workers {
+			group.Add(1)
+			go func() {
+				defer group.Done()
+				<-start
+				_, err := safeWriteTarget(root, fmt.Sprintf("content/%d.txt", index))
+				errors <- err
+			}()
+		}
+		close(start)
+		group.Wait()
+		close(errors)
+		for err := range errors {
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+}
+
+func TestDownloadFailureLeavesExistingEmptyDirectoryUntouched(t *testing.T) {
+	contents := []byte("incorrect size")
+	blob := NewIdentifier(contents)
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{{Path: "content/page.txt", Blob: blob, Size: int64(len(contents) + 1), Mimetype: "text/plain"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	indexRaw, err := json.Marshal(Index{Version: ManifestVersion, UpdatedAt: time.Now().UTC(), Published: manifestID, History: []Identifier{manifestID}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.sync/latest.json":
+			_, _ = w.Write(indexRaw)
+		case "/.sync/manifests/" + manifestFilename(manifestID):
 			_, _ = w.Write(manifestRaw)
 		case "/.sync/blobs/" + blob.Filename():
 			_, _ = w.Write(contents)
@@ -276,21 +364,31 @@ func TestDownloadFailureLeavesExistingEmptyDirectoryUntouched(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := Download(context.Background(), source, destination, server.Client()); err == nil {
+	if _, err := Download(context.Background(), source, destination, server.Client(), nil); err == nil {
 		t.Fatal("Download() error = nil for blob size mismatch")
 	}
 	entries, err := os.ReadDir(destination)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(entries) != 0 {
+	if len(entries) != 1 || entries[0].Name() != ".hsync" {
 		t.Fatalf("failed download populated destination: %#v", entries)
+	}
+	temporaryEntries, err := os.ReadDir(filepath.Join(destination, ".hsync", "tmp"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(temporaryEntries) != 0 {
+		t.Fatalf("failed download left temporary jobs: %#v", temporaryEntries)
+	}
+	if _, err := (Repository{Root: destination}).prepare("verify-clean-workspace"); err != nil {
+		t.Fatal(err)
 	}
 }
 
 func TestOpenRepositoryLoadsOnlyLocalManifest(t *testing.T) {
 	directory := t.TempDir()
-	manifestRaw, _, err := SerializeManifest(Manifest{Version: ManifestVersion, SyncPath: "/.sync/latest.json", Entries: []ManifestEntry{}})
+	manifestRaw, _, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: []ManifestEntry{}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +402,7 @@ func TestOpenRepositoryLoadsOnlyLocalManifest(t *testing.T) {
 	if _, err := OpenRepository(directory); err != nil {
 		t.Fatalf("OpenRepository() error = %v", err)
 	}
-	if _, _, err := OpenCheckout(directory, SyncConfig{}, nil); err == nil {
-		t.Fatal("OpenCheckout() error = nil without sync.remote")
+	if _, _, err := openConfiguredRepository(directory, SyncConfig{}, nil); err == nil {
+		t.Fatal("openConfiguredRepository() error = nil without sync.remote")
 	}
 }

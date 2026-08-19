@@ -66,18 +66,17 @@ func resetHandler(execution *clic.Execution) error {
 	if execution.Command.PositionalArguments() == 1 {
 		execution.WorkingDirectory = execution.Command.State.Arguments[0]
 	}
-	config, err := hsync.LoadSyncConfig(execution.WorkingDirectory, execution.Options["config"].StringValue())
+	operation, err := hsync.Reset(
+		execution.Context,
+		execution.WorkingDirectory,
+		execution.Options["config"].StringValue(),
+		execution.Stdout,
+		nil,
+		execution.Options["interactive"].BoolValue(),
+	)
 	if err != nil {
 		return err
 	}
-	repository, remote, err := hsync.OpenCheckout(config.Directory(), *config.Sync, nil)
-	if err != nil {
-		return err
-	}
-	result, err := repository.Reset(execution.Context, remote, hsync.ResetOptions{Output: execution.Stdout, Interactive: execution.Options["interactive"].BoolValue()})
-	if err != nil {
-		return err
-	}
-	_, err = fmt.Fprintln(execution.Stdout, result.ManifestID)
+	_, err = fmt.Fprintln(execution.Stdout, operation.Repository.Base.ID())
 	return err
 }

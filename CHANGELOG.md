@@ -7,9 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* **BREAKING:** Reworked the public synchronization model around `Operation`,
+  `GetOperation`, and `PutOperation`. `Download`, `Pull`, `Push`, and `Reset`
+  now construct, run, and return their respective operations. Removed the former
+  `Sync`, hsync `Deployment`, result, and `Payload` APIs rather than retaining
+  compatibility shims.
+* **BREAKING:** Manifests now serialize `index_path` in place of `sync_path`.
+  Existing pre-release remote synchronization state and local
+  `.hsync/manifest.json` files must be removed before reinitializing and
+  publishing with this release.
+* **BREAKING:** Manifests are now sealed values. Construct them with
+  `NewManifest` or `NewSealedManifest`, change unsealed state through setters,
+  and use accessors for their index path, entries, raw bytes, and identifier.
+* **Added:** Explicit repository and remote reconciliation state:
+  `Repository.Base`, `Repository.Local`, and `Remote.Head`. `Lineage` and
+  `Reconciliation` expose the verified base/local/head comparison used by pull
+  and publication.
+* **Added:** `Changeset` as the provider-neutral output of reconciliation. Its
+  `Apply(root)` method materializes exact publication files directly into a
+  deployment directory.
+* **Changed:** Pull, download, reset, and push now share operation status,
+  remote, repository, logging, and temporary-workspace state. hsync status is
+  separate from the nested htup deployment status.
+* **Changed:** Remote endpoints resolve to `Remote.IndexURL`; remote reads
+  refresh and retain `Remote.Head` rather than returning loose manifest bytes
+  and identifiers.
+
 ## v0.5.3 (2026-08-18)
 
-* Updated `github.com/herdworks/htup` to v0.27.2 with improve failure reasons
+* Updated `github.com/herdworks/htup` to v0.27.2 with improved failure reasons.
 
 ## v0.5.2 (2026-08-13)
 
@@ -92,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 * Added the manifest/blob synchronization engine with generic HTTP reads,
   scanner-based reconciliation, immutable changesets, and guarded local
   finalization.
-* Added the `Sync`, `Repository`, `Payload`, `Changeset`, `SyncStatus`, and
+* Added the `Operation`, `Repository`, `Payload`, `Changeset`, `OperationStatus`, and
   `Index` public model. `Index` is the mutable publication index for immutable
   manifests.
 * Added the standalone `hypersync init` and `hypersync reconcile` commands for
