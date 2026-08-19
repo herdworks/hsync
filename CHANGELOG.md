@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.6.0 (2026-08-19)
+
 * **BREAKING:** Reworked the public synchronization model around `Operation`,
   `GetOperation`, and `PutOperation`. `Download`, `Pull`, `Push`, and `Reset`
   now construct, run, and return their respective operations. Removed the former
