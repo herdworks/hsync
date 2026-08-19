@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.6.1 (2026-08-19)
+
+* Updated LibReleaseDate
+
 ## v0.6.0 (2026-08-19)
 
 * **BREAKING:** Reworked the public synchronization model around `Operation`,
