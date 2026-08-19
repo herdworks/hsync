@@ -3,11 +3,15 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/herdworks/clic"
 	"github.com/herdworks/hsync"
@@ -133,6 +137,62 @@ func TestCommandFactoriesComposeEveryCanonicalHsyncCommand(t *testing.T) {
 			if option == second.Spec.Options[optionKey] {
 				t.Fatalf("%s factory shared option %q", key, optionKey)
 			}
+		}
+	}
+}
+
+func TestNoopCommandsReportGitStyleStatus(t *testing.T) {
+	workspace := t.TempDir()
+	manifest, err := hsync.NewSealedManifest("/.hsync/index.json", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".hsync"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, hsync.LocalManifestPath), manifest.Raw(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestFilename, err := manifest.Filename()
+	if err != nil {
+		t.Fatal(err)
+	}
+	index, err := json.Marshal(hsync.Index{Version: 1, UpdatedAt: time.Now().UTC(), Published: manifest.ID(), History: []hsync.Identifier{manifest.ID()}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/.hsync/index.json":
+			_, _ = writer.Write(index)
+		case "/.hsync/manifests/" + manifestFilename:
+			_, _ = writer.Write(manifest.Raw())
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	if err := os.WriteFile(filepath.Join(workspace, "hsync.yaml"), []byte("sync:\n  remote: "+server.URL+"/.hsync/index.json\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		arguments clic.Arguments
+		want      string
+	}{
+		{arguments: clic.Arguments{"pull"}, want: "Already up to date.\n"},
+		{arguments: clic.Arguments{"push"}, want: "Everything up-to-date\n"},
+	}
+	for _, test := range tests {
+		output := &bytes.Buffer{}
+		execution := execution(t)
+		execution.WorkingDirectory = workspace
+		execution.Stdout = output
+		result := CLI.Run(execution, test.arguments)
+		if result.Error != nil {
+			t.Fatalf("CLI.Run(%v) error = %v", test.arguments, result.Error)
+		}
+		if output.String() != test.want {
+			t.Fatalf("CLI.Run(%v) output = %q, want %q", test.arguments, output.String(), test.want)
 		}
 	}
 }

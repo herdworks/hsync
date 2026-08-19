@@ -18,6 +18,26 @@ type PushOperation struct {
 	PutOperation
 }
 
+// Run prepares a changeset and publishes it only when reconciliation finds
+// local changes that the remote does not already contain.
+func (operation *PushOperation) Run(ctx context.Context) error {
+	if operation == nil || operation.Deployment == nil {
+		return fmt.Errorf("push operation is incomplete")
+	}
+	if err := operation.PutOperation.Prepare(ctx); err != nil {
+		return err
+	}
+	if operation.Status == StatusNoop || operation.Status == StatusAdopted {
+		return nil
+	}
+	if operation.ProviderStatus() == htup.DeploymentPending {
+		if err := operation.prepareProvider(ctx); err != nil {
+			return err
+		}
+	}
+	return operation.PutOperation.put(ctx)
+}
+
 // Push reconciles and publishes the repository containing its configuration
 // without requiring an SSG, then returns the completed operation.
 func Push(ctx context.Context, directory, configPath, environment string, providers []string, secrets htup.SecretsProviders) (*PushOperation, error) {

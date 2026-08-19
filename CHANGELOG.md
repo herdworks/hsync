@@ -7,12 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* Changed `PutOperation.Prepare` to reconcile state without materializing a
+  provider plan, and to be idempotent. `Deployment.Run` performs the full
+  deployment lifecycle, while `PushOperation.Run` skips provider planning and
+  execution when reconciliation is no-op or adopts an existing remote head.
+* Changed no-op pull and push CLI commands to report `Already up to date.` and
+  `Everything up-to-date`, respectively.
+
 ## v0.6.3 (2026-08-19)
 
 * Added `Deployment` and `NewDeployment` as a thin convenience layer for an
-  hsync-enabled `htup.Deployment`. `Deployment` and `PushOperation` both
-  promote `PutOperation.Run`, which prepares reconciliation, executes the
-  provider deployment, and finalizes synchronization.
+  hsync-enabled `htup.Deployment`.
 
 ## v0.6.2 (2026-08-19)
 

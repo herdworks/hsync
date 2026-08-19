@@ -51,13 +51,21 @@ func pullValidator(execution *clic.Execution) error {
 }
 
 // pull handler
-func pullHandler(execution *clic.Execution) error {
+func pullHandler(execution *clic.Execution) (err error) {
+	var operation *hsync.PullOperation
 	// Use the positional directory as the working directory, if provided.
 	if execution.Command.PositionalArguments() == 1 {
 		execution.WorkingDirectory = execution.Command.State.Arguments[0]
 	}
-	operation, err := hsync.Pull(execution.Context, execution.WorkingDirectory, execution.Options["config"].StringValue(), execution.Stdout)
-	if err != nil {
+	if operation, err = hsync.Pull(
+		execution.Context,
+		execution.WorkingDirectory,
+		execution.Options["config"].StringValue(),
+		execution.Stdout,
+	); err != nil {
+		return err
+	} else if operation.Status == hsync.StatusNoop {
+		_, err := fmt.Fprintln(execution.Stdout, "Already up to date.")
 		return err
 	}
 	_, err = fmt.Fprintln(execution.Stdout, operation.Remote.Head.ID())

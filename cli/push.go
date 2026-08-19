@@ -88,8 +88,20 @@ func pushValidator(execution *clic.Execution) error {
 }
 
 // push handler
-func pushHandler(execution *clic.Execution) error {
-	_, err := hsync.Push(execution.Context, execution.WorkingDirectory, execution.Options["config"].StringValue(), execution.Options["environment"].StringValue(), splitPatterns(execution.Options["providers"].StringValue()), nil)
+func pushHandler(execution *clic.Execution) (err error) {
+	var operation *hsync.PushOperation
+	if operation, err = hsync.Push(
+		execution.Context,
+		execution.WorkingDirectory,
+		execution.Options["config"].StringValue(),
+		execution.Options["environment"].StringValue(),
+		splitPatterns(execution.Options["providers"].StringValue()),
+		nil,
+	); err != nil {
+		return err
+	} else if operation.Status == hsync.StatusNoop || operation.Status == hsync.StatusAdopted {
+		_, err = fmt.Fprintln(execution.Stdout, "Everything up-to-date")
+	}
 	return err
 }
 

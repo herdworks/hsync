@@ -320,7 +320,7 @@ func writeDeploymentConfig(t *testing.T, root, remote string, include []string) 
 	return path
 }
 
-func TestDeploymentPrepareBuildsProviderPlanAfterSync(t *testing.T) {
+func TestPutOperationPrepareReconcilesBeforeProviderPlan(t *testing.T) {
 	resetFacadeEngine()
 	workspace, payload := t.TempDir(), t.TempDir()
 	writeFile(t, filepath.Join(workspace, "content", "page.txt"), "page")
@@ -339,8 +339,17 @@ func TestDeploymentPrepareBuildsProviderPlanAfterSync(t *testing.T) {
 	if err := deployment.Prepare(context.Background()); err != nil {
 		t.Fatal(err)
 	}
+	if err := deployment.Prepare(context.Background()); err != nil {
+		t.Fatalf("second Prepare() error = %v", err)
+	}
 	if deployment.Status != StatusPrepared || deployment.Changeset == nil {
 		t.Fatalf("operation status = %#v, changeset = %#v", deployment.Status, deployment.Changeset)
+	}
+	if deployment.ProviderStatus() != htup.DeploymentPending {
+		t.Fatalf("provider status = %q, want pending", deployment.ProviderStatus())
+	}
+	if err := deployment.prepareProvider(context.Background()); err != nil {
+		t.Fatal(err)
 	}
 	if len(deployment.Instructions().Preconditions) != 1 {
 		t.Fatalf("instructions = %#v", deployment.Instructions())
@@ -362,7 +371,7 @@ func TestOperationFromConfigRejectsRepositoryDeploymentDirectory(t *testing.T) {
 	}
 }
 
-func TestDeploymentExecutesOrdinaryDeploymentAfterNoopSync(t *testing.T) {
+func TestPutOperationExecutesAndPushOperationSkipsAfterNoopSync(t *testing.T) {
 	resetFacadeEngine()
 	workspace := t.TempDir()
 	payload := t.TempDir()
@@ -392,7 +401,10 @@ func TestDeploymentExecutesOrdinaryDeploymentAfterNoopSync(t *testing.T) {
 	}))
 	defer server.Close()
 	configPath := writeDeploymentConfig(t, workspace, server.URL, []string{"content/**"})
-	deployment := testPutOperation(configPath, payload, nil, facadeProvider(), "", htup.CompleteDeployment, fixedNow)
+	newOperation := func() *PutOperation {
+		return testPutOperation(configPath, payload, nil, facadeProvider(), "", htup.CompleteDeployment, fixedNow)
+	}
+	deployment := newOperation()
 	if err := executePutOperation(context.Background(), deployment); err != nil {
 		t.Fatal(err)
 	}
@@ -401,6 +413,16 @@ func TestDeploymentExecutesOrdinaryDeploymentAfterNoopSync(t *testing.T) {
 	}
 	if deployment.Status != StatusNoop {
 		t.Fatalf("operation status = %q, want noop", deployment.Status)
+	}
+	push := &PushOperation{PutOperation: *newOperation()}
+	if err := push.Run(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if facadeEngine.calls != 1 || push.ProviderStatus() != htup.DeploymentPending {
+		t.Fatalf("calls = %d, deployment status = %q", facadeEngine.calls, push.ProviderStatus())
+	}
+	if push.Status != StatusNoop {
+		t.Fatalf("push status = %q, want noop", push.Status)
 	}
 }
 
@@ -420,6 +442,9 @@ func TestDeploymentUsesOneConfigSnapshotForSyncAndProviders(t *testing.T) {
 	deployment := testPutOperation(configPath, payload, configBytes, facadeProvider(), "", htup.IncrementalDeployment, fixedNow)
 	deployment.Writer = io.Discard
 	if err := deployment.Prepare(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := deployment.prepareProvider(context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if deployment.ProviderStatus() != htup.DeploymentReady {
@@ -554,5 +579,8 @@ func testPutOperation(configPath, payload string, configBytes []byte, providers 
 }
 
 func executePutOperation(ctx context.Context, operation *PutOperation) error {
-	return operation.Run(ctx)
+	deployment := &Deployment{PutOperation: *operation}
+	err := deployment.Run(ctx)
+	*operation = deployment.PutOperation
+	return err
 }

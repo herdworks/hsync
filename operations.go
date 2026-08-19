@@ -39,12 +39,13 @@ type getBlob struct {
 	err      error
 }
 
-// PutOperation prepares a Changeset and its declarative htup deployment.
+// PutOperation reconciles a Changeset for a declarative htup deployment.
 type PutOperation struct {
 	Operation
 	Changeset  *Changeset
 	Deployment *htup.Deployment
 	Secrets    htup.SecretsProviders
+	prepared   bool
 }
 
 // ResolveRepository resolves a local repository root without requiring it to exist.
@@ -157,15 +158,30 @@ func (download *getBlob) read(ctx context.Context, remote Remote, id Identifier)
 	return download.contents, download.err
 }
 
-// Run prepares, executes, and finalizes an hsync-enabled provider deployment.
-func (operation *PutOperation) Run(ctx context.Context) error {
-	if operation == nil || operation.Deployment == nil {
-		return fmt.Errorf("put operation is incomplete")
+// Prepare validates and reconciles an hsync-enabled provider deployment. It
+// does not materialize or execute a provider deployment plan.
+func (operation *PutOperation) Prepare(ctx context.Context) error {
+	if operation == nil {
+		return fmt.Errorf("put operation is required")
 	}
-	if operation.Deployment.Status() == htup.DeploymentPending {
-		if err := operation.Prepare(ctx); err != nil {
-			return err
-		}
+	if operation.Deployment == nil {
+		return fmt.Errorf("put operation deployment is required")
+	}
+	if operation.prepared {
+		return nil
+	}
+	configBytes, err := operation.prepareReconciliation(ctx)
+	if err != nil {
+		return err
+	}
+	operation.Deployment.ConfigBytes = configBytes
+	operation.prepared = true
+	return nil
+}
+
+func (operation *PutOperation) put(ctx context.Context) error {
+	if !operation.prepared || operation.Deployment.Status() != htup.DeploymentReady {
+		return fmt.Errorf("put operation provider deployment is not ready")
 	}
 	if err := operation.Deployment.Execute(ctx, operation.Secrets, operation.Writer); err != nil {
 		return err
@@ -179,42 +195,41 @@ func (operation *PutOperation) Run(ctx context.Context) error {
 	return nil
 }
 
-// Prepare prepares synchronization first, then materializes the immutable
-// provider plan. It performs no provider readiness checks or remote writes.
-func (operation *PutOperation) Prepare(ctx context.Context) error {
-	if operation == nil {
-		return fmt.Errorf("put operation is required")
-	}
-	if operation.Deployment == nil {
-		return fmt.Errorf("put operation deployment is required")
-	}
-	if operation.Deployment.Status() != htup.DeploymentPending {
-		return fmt.Errorf("put operation is already prepared")
-	}
+func (operation *PutOperation) prepareReconciliation(ctx context.Context) ([]byte, error) {
 	configBytes, err := operation.configBytes()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	configuration := operation.Deployment
-	context, err := operationFromConfig(ctx, configuration.ConfigPath, configBytes, configuration.PayloadPath, operation.Remote.Client, operation.now())
+	resolved, err := operationFromConfig(ctx, configuration.ConfigPath, configBytes, configuration.PayloadPath, operation.Remote.Client, operation.now())
 	if err != nil {
-		return err
+		return nil, err
 	}
-	if context != nil {
+	if resolved != nil {
 		id, tempDir, writer := operation.ID, operation.TempDir, operation.Writer
-		operation.Operation = *context
+		operation.Operation = *resolved
 		operation.Operation.ID = id
 		operation.Operation.TempDir = tempDir
 		operation.Operation.Writer = writer
 		operation.Operation.Now = operation.Now
 		if err := operation.prepare(ctx); err != nil {
-			return err
+			return nil, err
 		}
 	}
+	return configBytes, nil
+}
+
+func (operation *PutOperation) prepareProvider(ctx context.Context) error {
+	if !operation.prepared {
+		return fmt.Errorf("put operation is not prepared")
+	}
+	if operation.Deployment.Status() != htup.DeploymentPending {
+		return fmt.Errorf("put operation provider deployment is already prepared")
+	}
+	configuration := operation.Deployment
 	if configuration.Environment == "" && len(configuration.Providers) == 0 {
 		configuration.Environment = DefaultEnvironment
 	}
-	configuration.ConfigBytes = configBytes
 	if err := configuration.Prepare(ctx, operation.Writer); err != nil {
 		return err
 	}
