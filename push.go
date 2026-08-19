@@ -79,27 +79,6 @@ func Push(ctx context.Context, directory, configPath, environment string, provid
 	return operation, operation.Run(ctx)
 }
 
-func (operation *PushOperation) Run(ctx context.Context) error {
-	if operation == nil || operation.Deployment == nil {
-		return fmt.Errorf("push operation is incomplete")
-	}
-	if operation.Deployment.Status() == htup.DeploymentPending {
-		if err := operation.Prepare(ctx); err != nil {
-			return err
-		}
-	}
-	if err := operation.Deployment.Execute(ctx, operation.Secrets, operation.Writer); err != nil {
-		return err
-	}
-	if operation.Changeset == nil {
-		return nil
-	}
-	if err := operation.finalize(ctx); err != nil {
-		return fmt.Errorf("finalize synchronization: %w", err)
-	}
-	return nil
-}
-
 // preflightInitialPush refuses to create even temporary local state for a
 // repository with no local base when the remote has already been initialized.
 // Operation.Prepare repeats this check as part of its normal race-safe workflow.

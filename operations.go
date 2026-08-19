@@ -157,6 +157,28 @@ func (download *getBlob) read(ctx context.Context, remote Remote, id Identifier)
 	return download.contents, download.err
 }
 
+// Run prepares, executes, and finalizes an hsync-enabled provider deployment.
+func (operation *PutOperation) Run(ctx context.Context) error {
+	if operation == nil || operation.Deployment == nil {
+		return fmt.Errorf("put operation is incomplete")
+	}
+	if operation.Deployment.Status() == htup.DeploymentPending {
+		if err := operation.Prepare(ctx); err != nil {
+			return err
+		}
+	}
+	if err := operation.Deployment.Execute(ctx, operation.Secrets, operation.Writer); err != nil {
+		return err
+	}
+	if operation.Changeset == nil {
+		return nil
+	}
+	if err := operation.finalize(ctx); err != nil {
+		return fmt.Errorf("finalize synchronization: %w", err)
+	}
+	return nil
+}
+
 // Prepare prepares synchronization first, then materializes the immutable
 // provider plan. It performs no provider readiness checks or remote writes.
 func (operation *PutOperation) Prepare(ctx context.Context) error {

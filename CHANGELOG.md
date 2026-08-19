@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* Added `Deployment` and `NewDeployment` as a thin convenience layer for an
+  hsync-enabled `htup.Deployment`. `Deployment` and `PushOperation` both
+  promote `PutOperation.Run`, which prepares reconciliation, executes the
+  provider deployment, and finalizes synchronization.
+
 ## v0.6.2 (2026-08-19)
 
 * Updated github.com/herdworks/htup to version 0.27.3

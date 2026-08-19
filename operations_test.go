@@ -53,6 +53,14 @@ func TestPrepareInitialDeployment(t *testing.T) {
 	}
 }
 
+func TestNewDeployment(t *testing.T) {
+	provider := &htup.Deployment{}
+	deployment := NewDeployment(provider)
+	if deployment == nil || deployment.Deployment != provider {
+		t.Fatalf("deployment = %#v, want provider deployment", deployment)
+	}
+}
+
 func TestPrepareRemovesTrackedSymlinkFromNextManifest(t *testing.T) {
 	workspace, build := t.TempDir(), t.TempDir()
 	contents := []byte("tracked")
@@ -546,8 +554,5 @@ func testPutOperation(configPath, payload string, configBytes []byte, providers 
 }
 
 func executePutOperation(ctx context.Context, operation *PutOperation) error {
-	push := &PushOperation{PutOperation: *operation}
-	err := push.Run(ctx)
-	*operation = push.PutOperation
-	return err
+	return operation.Run(ctx)
 }
