@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.6.3 (2026-08-19)
+
 * Added `Deployment` and `NewDeployment` as a thin convenience layer for an
   hsync-enabled `htup.Deployment`. `Deployment` and `PushOperation` both
   promote `PutOperation.Run`, which prepares reconciliation, executes the
