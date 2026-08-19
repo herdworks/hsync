@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.6.4 (2026-08-19)
+
 * Changed `PutOperation.Prepare` to reconcile state without materializing a
   provider plan, and to be idempotent. `Deployment.Run` performs the full
   deployment lifecycle, while `PushOperation.Run` skips provider planning and
