@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.7.1 (2026-08-22)
+
 * Added `NewDeploymentWithConfig` for provider deployments that need to retain
   a caller-resolved synchronization configuration through reconciliation.
 * Fixed `PushWithConfig` to retain caller-resolved synchronization policy
