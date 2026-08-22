@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* Added `ConfigManager` and `DefaultConfigManager` for cohesive
+  configuration-path selection, reading, and initialization. Explicit config
+  paths now resolve relative to a supplied directory and must belong to it.
+* Added `PullWithConfig`, `PushWithConfig`, `ResetWithConfig`,
+  `StatusWithConfig`, `RemoteWithConfig`, and `ConfiguredRemote` for callers
+  that have already resolved a `RepositoryConfig`, or need a configured remote.
+* Added the `remote` CLI command, including `--index-url` for the resolved
+  synchronization-index URL.
+* Changed `status` to report selected files as added before the repository has
+  a local synchronization manifest, making it useful for checking sync rules
+  before the initial push.
+* Changed `status` to summarize added, modified, and deleted files after its
+  per-file output.
+* Added `status --verbose` to report included files ignored by synchronization
+  rules or limited for exceeding the configured maximum file size.
+* Added `init --verbose` to materialize the default synchronization policy,
+  including the resolved config path and the 20MB file-size limit.
+* Changed `hsync/cli.Command` and its leaf command factories to accept an
+  `ConfigManager`, allowing hosts to provide configuration policy without a
+  command-specific wrapper type.
+* Updated `github.com/herdworks/clic` to v0.4.3.
+
 ## v0.6.4 (2026-08-19)
 
 * Changed `PutOperation.Prepare` to reconcile state without materializing a

@@ -20,6 +20,14 @@ func Pull(ctx context.Context, directory, configPath string, writer io.Writer) (
 	if err != nil {
 		return nil, err
 	}
+	return PullWithConfig(ctx, config, writer)
+}
+
+// PullWithConfig incorporates remote changes using config.
+func PullWithConfig(ctx context.Context, config RepositoryConfig, writer io.Writer) (*PullOperation, error) {
+	if config.Sync == nil {
+		return nil, fmt.Errorf("pull requires sync configuration")
+	}
 	repository, remote, err := openConfiguredRepository(config.Directory(), *config.Sync, nil)
 	if err != nil {
 		return nil, err

@@ -64,7 +64,12 @@ func TestPullUsesConcurrentDownloadProgress(t *testing.T) {
 		t.Fatal(err)
 	}
 	var output bytes.Buffer
-	result, err := Pull(context.Background(), checkout, writePullConfig(t, checkout, server.URL+"/.sync/latest.json"), &output)
+	configPath := writePullConfig(t, checkout, server.URL+"/.sync/latest.json")
+	config, _, err := ReadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := PullWithConfig(context.Background(), config, &output)
 	if err != nil {
 		t.Fatal(err)
 	}

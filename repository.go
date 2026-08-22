@@ -31,14 +31,30 @@ const (
 
 var reservedPaths = []string{".git/**", ".hsync/**", ".deployment/**"}
 
-// Local contains the current selected workspace entries and their exact blob
-// bytes. It is an ephemeral cache refreshed from Repository.Root.
+// Local contains the current workspace scan. Entries and blobs form the
+// effective synchronization set; ignored and limited entries are diagnostics.
 type Local struct {
 	entries map[string]ManifestEntry
+	ignored map[string]ManifestEntry
+	limited map[string]ManifestEntry
 	Blobs   map[Identifier][]byte
 }
 
 type gitignoreRules struct{ expressions PathExpressions }
+
+func (local Local) Entries() []ManifestEntry {
+	return sortedEntries(local.entries)
+}
+
+// IgnoredEntries returns ignored workspace entries in path order.
+func (local Local) IgnoredEntries() []ManifestEntry {
+	return sortedEntries(local.ignored)
+}
+
+// LimitedEntries returns size-limited workspace entries in path order.
+func (local Local) LimitedEntries() []ManifestEntry {
+	return sortedEntries(local.limited)
+}
 
 func (local *Local) add(entry ManifestEntry, contents []byte) {
 	if local.entries == nil {
@@ -51,13 +67,18 @@ func (local *Local) add(entry ManifestEntry, contents []byte) {
 	local.Blobs[entry.Blob] = contents
 }
 
-func (local Local) Entries() []ManifestEntry {
-	entries := make([]ManifestEntry, 0, len(local.entries))
-	for _, entry := range local.entries {
-		entries = append(entries, entry)
+func (local *Local) ignore(entry ManifestEntry) {
+	if local.ignored == nil {
+		local.ignored = make(map[string]ManifestEntry)
 	}
-	sort.Slice(entries, func(left, right int) bool { return entries[left].Path < entries[right].Path })
-	return entries
+	local.ignored[entry.Path] = entry
+}
+
+func (local *Local) limit(entry ManifestEntry) {
+	if local.limited == nil {
+		local.limited = make(map[string]ManifestEntry)
+	}
+	local.limited[entry.Path] = entry
 }
 
 // ChangeKind describes how a selected workspace file differs from its base.
@@ -80,6 +101,8 @@ type Change struct {
 type RepositoryStatus struct {
 	Base    Identifier
 	Changes []Change
+	Ignored []ManifestEntry
+	Limited []ManifestEntry
 }
 
 // Initialize writes this repository's new immutable local base manifest. It
@@ -159,19 +182,34 @@ func (repository *Repository) Snapshot() error {
 }
 
 // Status reports selected workspace changes from this repository's current
-// immutable base. It reads no remote state and does not modify local files.
+// immutable base. Without a local base, it reports selected files as added. It
+// reads no remote state and does not modify local files.
 func (repository *Repository) Status() (RepositoryStatus, error) {
 	if repository.Root == "" {
 		return RepositoryStatus{}, fmt.Errorf("%w: repository root is required", ErrInvalidState)
 	}
 	base, err := repository.RefreshBase()
-	if err != nil {
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return RepositoryStatus{}, err
 	}
 	if err := repository.Snapshot(); err != nil {
 		return RepositoryStatus{}, err
 	}
-	return RepositoryStatus{Base: base.ID(), Changes: compareWorkspace(base, repository.Local)}, nil
+	return RepositoryStatus{
+		Base:    base.ID(),
+		Changes: compareWorkspace(base, repository.Local),
+		Ignored: repository.Local.IgnoredEntries(),
+		Limited: repository.Local.LimitedEntries(),
+	}, nil
+}
+
+// StatusWithConfig reports workspace changes using config.
+func StatusWithConfig(config RepositoryConfig) (RepositoryStatus, error) {
+	if config.Sync == nil {
+		return RepositoryStatus{}, fmt.Errorf("status requires sync configuration")
+	}
+	repository := Repository{Root: config.Directory(), Config: config.Sync}
+	return repository.Status()
 }
 
 // Finalize validates the deployed changeset against the clean head index and
@@ -374,7 +412,14 @@ func (repository Repository) scanLocal(manifest *Manifest) (Local, error) {
 		return Local{}, err
 	}
 	for _, entry := range discovered.entries {
-		if policy.Includes(entry) && policy.Allows(entry) && gitignore.Allows(entry.Path) {
+		switch {
+		case !policy.includes(entry):
+			continue // a file cannot be ignored, limited, or tracked if it isn't first included
+		case policy.ignores(entry) || !gitignore.Allows(entry.Path):
+			files.ignore(entry)
+		case policy.limits(entry):
+			files.limit(entry)
+		default:
 			files.add(entry, discovered.Blobs[entry.Blob])
 		}
 	}
@@ -450,6 +495,15 @@ func compareWorkspace(base Manifest, local Local) []Change {
 		}
 	}
 	return changes
+}
+
+func sortedEntries(entries map[string]ManifestEntry) []ManifestEntry {
+	result := make([]ManifestEntry, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, entry)
+	}
+	sort.Slice(result, func(left, right int) bool { return result[left].Path < result[right].Path })
+	return result
 }
 
 func walk(workspace string) (Local, error) {

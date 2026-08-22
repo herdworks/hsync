@@ -118,7 +118,11 @@ func TestPushDeploysOnlyGeneratedSnapshotAndFinalizesInitialManifest(t *testing.
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	operation, err := Push(context.Background(), "", configPath, "", nil, nil)
+	loaded, _, err := ReadConfig(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation, err := PushWithConfig(context.Background(), loaded, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

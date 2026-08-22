@@ -8,24 +8,39 @@ import (
 )
 
 // init command
-func InitCommand() clic.Command {
-	config := GlobalConfigOption()
-	config.Meta.Description = "Configuration file to create (or ${{ .EnvName }})."
-	config.Meta.Default = hsync.DefaultConfigPath
-	config.Meta.ShowDefault = false
+func InitCommand(config hsync.ConfigManager) clic.Command {
+	if config == nil {
+		config = hsync.DefaultConfigManager{}
+	}
+	configOption := GlobalConfigOption()
+	configOption.Meta.Description = "Configuration file to create (or ${{ .EnvName }})."
+	configOption.Meta.Default = config.DefaultConfigPath()
+	configOption.Meta.ShowDefault = false
+	verbose := clic.Option{
+		Meta: clic.OptionMeta{
+			Description: "Write the manager's effective synchronization configuration.",
+		},
+		Spec: clic.OptionSpec{
+			Key:  "verbose",
+			Kind: clic.BoolOption,
+		},
+	}
 	return clic.Command{
 		Meta: clic.CommandMeta{
 			Description: "Initialize a website for synchronization.",
-			Usage:       []string{"{{ .Command }} <remote> [--config hsync.yaml]"},
+			Usage:       []string{"{{ .Command }} <remote> [--config hsync.yaml] [--verbose]"},
 		},
 		Spec: clic.CommandSpec{
 			Key: "init",
 			Options: clic.Options{
-				config.Spec.Key: &config,
+				configOption.Spec.Key: &configOption,
+				verbose.Spec.Key:      &verbose,
 			},
 			Help:      clic.DefaultHelp,
 			Validator: initValidator,
-			Handler:   initHandler,
+			Handler: func(execution *clic.Execution) error {
+				return initHandler(execution, config)
+			},
 		},
 	}
 }
@@ -39,6 +54,6 @@ func initValidator(execution *clic.Execution) error {
 }
 
 // init handler
-func initHandler(execution *clic.Execution) error {
-	return hsync.InitializeConfig(execution.Options["config"].StringValue(), execution.Command.State.Arguments[0])
+func initHandler(execution *clic.Execution, config hsync.ConfigManager) error {
+	return config.Initialize(execution.WorkingDirectory, execution.Options["config"].StringValue(), execution.Command.State.Arguments[0], execution.Options["verbose"].BoolValue())
 }

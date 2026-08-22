@@ -150,6 +150,24 @@ func TestRepositoryResetNoopDoesNotReadRemote(t *testing.T) {
 	}
 }
 
+func TestResetWithConfigDoesNotReadRemoteForNoop(t *testing.T) {
+	checkout := t.TempDir()
+	contents := []byte("unchanged")
+	entry := ManifestEntry{Path: "tracked.txt", Blob: NewIdentifier(contents), Size: int64(len(contents)), Mimetype: "text/plain"}
+	writeResetManifest(t, checkout, []ManifestEntry{entry})
+	writeResetTestFile(t, checkout, entry.Path, contents)
+	result, err := ResetWithConfig(context.Background(), RepositoryConfig{
+		Path: filepath.Join(checkout, "site.yaml"),
+		Sync: &SyncConfig{Remote: "https://example.com/.sync/latest.json"},
+	}, nil, nil, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Status != StatusNoop || result.Files != 0 {
+		t.Fatalf("result = %#v", result)
+	}
+}
+
 func writeResetManifest(t *testing.T, root string, entries []ManifestEntry) Repository {
 	t.Helper()
 	raw, _, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.sync/latest.json", entries: entries})

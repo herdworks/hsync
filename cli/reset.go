@@ -8,8 +8,11 @@ import (
 )
 
 // reset command
-func ResetCommand() clic.Command {
-	config, interactive := GlobalConfigOption(), ResetInteractiveOption()
+func ResetCommand(config hsync.ConfigManager) clic.Command {
+	if config == nil {
+		config = hsync.DefaultConfigManager{}
+	}
+	configOption, interactive := GlobalConfigOption(), ResetInteractiveOption()
 	return clic.Command{
 		Meta: clic.CommandMeta{
 			Description: "Reset modified files in the workspace.",
@@ -19,11 +22,13 @@ func ResetCommand() clic.Command {
 			Key:  "reset",
 			Help: clic.DefaultHelp,
 			Options: clic.Options{
-				"config":      &config,
+				"config":      &configOption,
 				"interactive": &interactive,
 			},
 			Validator: resetValidator,
-			Handler:   resetHandler,
+			Handler: func(execution *clic.Execution) error {
+				return resetHandler(execution, config)
+			},
 		},
 	}
 }
@@ -47,29 +52,24 @@ func resetValidator(execution *clic.Execution) error {
 	if execution.Command.PositionalArguments() > 1 {
 		return fmt.Errorf("%s accepts at most one directory", execution.Command.Meta.Name)
 	}
-	config := execution.Options["config"]
-	if execution.Command.PositionalArguments() > 0 && config.StringValue() != "" {
-		return fmt.Errorf(
-			"%s cannot combine a directory argument with -%s/--%s or $%s",
-			execution.Command.Meta.Name,
-			config.Meta.ShortName,
-			config.Meta.Name,
-			config.Meta.EnvName,
-		)
-	}
 	return nil
 }
 
 // reset handler
-func resetHandler(execution *clic.Execution) error {
-	// Use the positional directory as the working directory, if provided.
+func resetHandler(execution *clic.Execution, manager hsync.ConfigManager) error {
+	directory, configPath := "", execution.Options["config"].StringValue()
 	if execution.Command.PositionalArguments() == 1 {
-		execution.WorkingDirectory = execution.Command.State.Arguments[0]
+		directory = execution.Command.State.Arguments[0]
+	} else if configPath == "" {
+		directory = execution.WorkingDirectory
 	}
-	operation, err := hsync.Reset(
+	config, err := manager.Read(directory, configPath)
+	if err != nil {
+		return err
+	}
+	operation, err := hsync.ResetWithConfig(
 		execution.Context,
-		execution.WorkingDirectory,
-		execution.Options["config"].StringValue(),
+		config,
 		execution.Stdout,
 		nil,
 		execution.Options["interactive"].BoolValue(),

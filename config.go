@@ -25,6 +25,13 @@ type RepositoryConfig struct {
 	Sync         *SyncConfig                  `json:"sync,omitempty" yaml:"sync,omitempty"`
 }
 
+// ConfigManager resolves and initializes synchronization configuration for one repository.
+type ConfigManager interface {
+	DefaultConfigPath() string
+	Read(directory, filename string) (RepositoryConfig, error)
+	Initialize(directory, filename, remote string, verbose bool) error
+}
+
 // SyncConfig configures local synchronization policy. It is external to the
 // immutable manifest so changing it becomes an ordinary synchronized file
 // change rather than a manifest migration.
@@ -35,6 +42,9 @@ type SyncConfig struct {
 	MaxFileSize  string `json:"max_file_size,omitempty" yaml:"max_file_size,omitempty"`
 	MaxFileBytes int64  `json:"max_file_bytes,omitempty" yaml:"max_file_bytes,omitempty"`
 }
+
+// DefaultConfigManager manages hsync's standard file-backed configuration.
+type DefaultConfigManager struct{}
 
 // Rules contains optional path and MIME glob constraints.
 type Rules struct {
@@ -71,6 +81,8 @@ const DefaultIndexPath = "/.hsync/index.json"
 // when a caller does not select providers or an environment explicitly.
 const DefaultEnvironment = "hsync"
 
+const DefaultMaxFileSize = "20MB"
+
 var configCandidates = []string{"hsync.yaml", "hsync.json", ".hsync.yaml", ".hsync.json"}
 
 // Directory returns the repository root containing this configuration.
@@ -79,6 +91,19 @@ func (config RepositoryConfig) Directory() string {
 		return ""
 	}
 	return filepath.Dir(config.Path)
+}
+
+// DefaultConfigPath returns hsync's standard configuration filename.
+func (DefaultConfigManager) DefaultConfigPath() string { return DefaultConfigPath }
+
+// Read resolves hsync's standard file-backed configuration.
+func (DefaultConfigManager) Read(directory, filename string) (RepositoryConfig, error) {
+	return LoadSyncConfig(directory, filename)
+}
+
+// Initialize creates hsync's standard file-backed configuration.
+func (DefaultConfigManager) Initialize(directory, filename, remote string, verbose bool) error {
+	return InitializeConfigAt(directory, filename, remote, verbose)
 }
 
 // Validate checks a complete local synchronization configuration.
@@ -175,21 +200,29 @@ func (SyncConfig) JSONSchemaDescription() string {
 // Allows reports whether entry remains after the ignore and size rules are
 // applied. These rules apply to both manifest entries and newly scanned files.
 func (policy SyncPolicy) Allows(entry ManifestEntry) bool {
+	if _, err := mimetypes.Base(entry.Mimetype); err != nil {
+		return false
+	}
+	return !policy.ignores(entry) && !policy.limits(entry)
+}
+
+func (policy SyncPolicy) ignores(entry ManifestEntry) bool {
 	base, err := mimetypes.Base(entry.Mimetype)
 	if err != nil {
 		return false
 	}
-	if policy.maxBytes > 0 && entry.Size > policy.maxBytes {
-		return false
-	}
 	matched, ignored := policy.ignorePaths.match(entry.Path)
-	return !(matched && ignored) && !matchesAny(policy.ignoreTypes, base)
+	return matched && ignored || matchesAny(policy.ignoreTypes, base)
 }
 
-// Includes reports whether entry is eligible for discovery. An empty include
+func (policy SyncPolicy) limits(entry ManifestEntry) bool {
+	return policy.maxBytes > 0 && entry.Size > policy.maxBytes
+}
+
+// includes reports whether entry is eligible for discovery. An empty include
 // selects no new files, while existing manifest entries remain eligible for
 // the subsequent ignore and size rules.
-func (policy SyncPolicy) Includes(entry ManifestEntry) bool {
+func (policy SyncPolicy) includes(entry ManifestEntry) bool {
 	if !policy.ScanningEnabled() {
 		return false
 	}
@@ -279,12 +312,15 @@ func (expression PathExpression) matchesPath(value string) bool {
 // LoadSyncConfig loads one explicit or discovered hsync configuration rooted at
 // directory. It requires and validates the synchronization configuration.
 func LoadSyncConfig(directory, filename string) (RepositoryConfig, error) {
+	explicitFilename := filename != ""
 	if filename == "" {
 		var err error
 		filename, err = DiscoverConfig(directory)
 		if err != nil {
 			return RepositoryConfig{}, err
 		}
+	} else if directory != "" && !filepath.IsAbs(filename) {
+		filename = filepath.Join(directory, filename)
 	}
 	if filename == "" {
 		return RepositoryConfig{}, ErrSyncConfigNotFound
@@ -299,7 +335,44 @@ func LoadSyncConfig(directory, filename string) (RepositoryConfig, error) {
 	if err := config.Sync.Validate(); err != nil {
 		return RepositoryConfig{}, err
 	}
+	if explicitFilename && directory != "" {
+		provided, err := filepath.Abs(directory)
+		if err != nil {
+			return RepositoryConfig{}, err
+		}
+		configured, err := filepath.Abs(config.Directory())
+		if err != nil {
+			return RepositoryConfig{}, err
+		}
+		if provided != configured {
+			return RepositoryConfig{}, fmt.Errorf("config %s belongs to %s, not %s", config.Path, configured, provided)
+		}
+	}
 	return config, nil
+}
+
+// ConfiguredRemote returns the configured remote, or its resolved index URL.
+func ConfiguredRemote(directory, configPath string, indexURL bool) (remote string, err error) {
+	var config RepositoryConfig
+	if config, err = LoadSyncConfig(directory, configPath); err != nil {
+		return "", err
+	}
+	return RemoteWithConfig(config, indexURL)
+}
+
+// RemoteWithConfig returns config's configured remote, or its resolved index URL.
+func RemoteWithConfig(config RepositoryConfig, indexURL bool) (remote string, err error) {
+	if config.Sync == nil {
+		return "", fmt.Errorf("sync configuration is empty")
+	}
+	if !indexURL {
+		return config.Sync.Remote, nil
+	}
+	var resolved *url.URL
+	if resolved, err = config.Sync.RemoteURL(); err != nil {
+		return "", err
+	}
+	return resolved.String(), nil
 }
 
 // DiscoverConfig returns one unambiguous default configuration directly under
@@ -355,18 +428,28 @@ func ParseConfig(raw []byte) (RepositoryConfig, error) {
 // InitializeConfig creates a new repository-root configuration with no
 // deployment providers and synchronization enabled for remote.
 func InitializeConfig(filename, remote string) error {
+	return InitializeConfigAt("", filename, remote, false)
+}
+
+// InitializeConfigAt creates a new repository-root configuration in directory.
+func InitializeConfigAt(directory, filename, remote string, verbose bool) error {
+	var err error
+	if directory == "" {
+		if directory, err = os.Getwd(); err != nil {
+			return err
+		}
+	}
 	if filename == "" {
 		filename = DefaultConfigPath
 	}
-	root := "."
 	if filepath.IsAbs(filename) {
-		root, filename = filepath.Dir(filename), filepath.Base(filename)
+		directory, filename = filepath.Dir(filename), filepath.Base(filename)
 	}
-	target, err := configTarget(root, filename)
+	target, err := configTarget(directory, filename)
 	if err != nil {
 		return err
 	}
-	target, err = safeWriteTarget(root, target)
+	target, err = safeWriteTarget(directory, target)
 	if err != nil {
 		return err
 	}
@@ -377,6 +460,14 @@ func InitializeConfig(filename, remote string) error {
 		return err
 	}
 	config := RepositoryConfig{Providers: htup.HostingProviders{}, Environments: map[string]*htup.Environment{}, Sync: &SyncConfig{Remote: remote}}
+	if verbose {
+		configPath, err := filepath.Rel(directory, target)
+		if err != nil {
+			return err
+		}
+		config.Sync.Include.Paths = []string{filepath.ToSlash(configPath)}
+		config.Sync.MaxFileSize = DefaultMaxFileSize
+	}
 	if err := config.Sync.Validate(); err != nil {
 		return err
 	}

@@ -9,8 +9,11 @@ import (
 )
 
 // push command
-func PushCommand() clic.Command {
-	config := GlobalConfigOption()
+func PushCommand(config hsync.ConfigManager) clic.Command {
+	if config == nil {
+		config = hsync.DefaultConfigManager{}
+	}
+	configOption := GlobalConfigOption()
 	environment := PushEnvironmentOption()
 	providers := PushProvidersOption()
 	return clic.Command{
@@ -27,12 +30,14 @@ func PushCommand() clic.Command {
 			Key:  "push",
 			Help: clic.DefaultHelp,
 			Options: clic.Options{
-				"config":      &config,
+				"config":      &configOption,
 				"environment": &environment,
 				"providers":   &providers,
 			},
 			Validator: pushValidator,
-			Handler:   pushHandler,
+			Handler: func(execution *clic.Execution) error {
+				return pushHandler(execution, config)
+			},
 		},
 	}
 }
@@ -88,12 +93,19 @@ func pushValidator(execution *clic.Execution) error {
 }
 
 // push handler
-func pushHandler(execution *clic.Execution) (err error) {
+func pushHandler(execution *clic.Execution, manager hsync.ConfigManager) (err error) {
 	var operation *hsync.PushOperation
-	if operation, err = hsync.Push(
+	directory, configPath := "", execution.Options["config"].StringValue()
+	if configPath == "" {
+		directory = execution.WorkingDirectory
+	}
+	config, err := manager.Read(directory, configPath)
+	if err != nil {
+		return err
+	}
+	if operation, err = hsync.PushWithConfig(
 		execution.Context,
-		execution.WorkingDirectory,
-		execution.Options["config"].StringValue(),
+		config,
 		execution.Options["environment"].StringValue(),
 		splitPatterns(execution.Options["providers"].StringValue()),
 		nil,

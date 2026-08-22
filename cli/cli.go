@@ -10,12 +10,12 @@ import (
 
 // CLI is hsync's canonical standalone command composition.
 var CLI = clic.CLI{
-	Command: Command(),
+	Command: Command(nil),
 	Version: string(hsync.LibVersion),
 }
 
-// Command returns hsync's canonical command composition.
-func Command() clic.Command {
+// Command returns hsync's canonical command composition using config.
+func Command(config hsync.ConfigManager) clic.Command {
 	return clic.Command{
 		Meta: clic.CommandMeta{
 			Description: fmt.Sprintf("%s is an HTTP sync tool.", hsync.LibName),
@@ -26,13 +26,14 @@ func Command() clic.Command {
 			Key:  hsync.LibName,
 			Help: clic.DefaultHelp,
 		},
-		Commands: clic.MustCommandsFrom(
-			DownloadCommand,
-			InitCommand,
-			PullCommand,
-			PushCommand,
-			ResetCommand,
-			StatusCommand,
+		Commands: clic.MustCommands(
+			DownloadCommand(),
+			InitCommand(config),
+			PullCommand(config),
+			PushCommand(config),
+			RemoteCommand(config),
+			ResetCommand(config),
+			StatusCommand(config),
 		),
 	}
 }

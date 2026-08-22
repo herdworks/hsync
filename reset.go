@@ -119,6 +119,14 @@ func Reset(ctx context.Context, directory, configPath string, writer io.Writer, 
 	if err != nil {
 		return nil, err
 	}
+	return ResetWithConfig(ctx, config, writer, input, interactive)
+}
+
+// ResetWithConfig restores selected entries using config.
+func ResetWithConfig(ctx context.Context, config RepositoryConfig, writer io.Writer, input io.Reader, interactive bool) (*ResetOperation, error) {
+	if config.Sync == nil {
+		return nil, fmt.Errorf("reset requires sync configuration")
+	}
 	repository, remote, err := openConfiguredRepository(config.Directory(), *config.Sync, nil)
 	if err != nil {
 		return nil, err

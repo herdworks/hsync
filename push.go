@@ -41,27 +41,15 @@ func (operation *PushOperation) Run(ctx context.Context) error {
 // Push reconciles and publishes the repository containing its configuration
 // without requiring an SSG, then returns the completed operation.
 func Push(ctx context.Context, directory, configPath, environment string, providers []string, secrets htup.SecretsProviders) (*PushOperation, error) {
-	if directory == "" {
-		var err error
-		directory, err = os.Getwd()
-		if err != nil {
-			return nil, err
-		}
-	}
-	if configPath == "" {
-		var err error
-		configPath, err = DiscoverConfig(directory)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if configPath == "" {
-		return nil, fmt.Errorf("deployment config is required")
-	}
-	config, configBytes, err := ReadConfig(configPath)
+	config, err := (DefaultConfigManager{}).Read(directory, configPath)
 	if err != nil {
 		return nil, err
 	}
+	return PushWithConfig(ctx, config, environment, providers, secrets)
+}
+
+// PushWithConfig reconciles and publishes the repository configured by config.
+func PushWithConfig(ctx context.Context, config RepositoryConfig, environment string, providers []string, secrets htup.SecretsProviders) (*PushOperation, error) {
 	if config.Sync == nil {
 		return nil, fmt.Errorf("push requires sync configuration")
 	}
@@ -84,16 +72,17 @@ func Push(ctx context.Context, directory, configPath, environment string, provid
 		},
 		Deployment: &htup.Deployment{
 			ConfigPath:    config.Path,
-			ConfigBytes:   configBytes,
 			ProviderNames: providers,
 			Environment:   environment,
 			Kind:          htup.IncrementalDeployment,
 		},
 		Secrets: secrets,
 	}}
-	if operation.TempDir, err = operation.Repository.prepare(operation.ID); err != nil {
+	tempDir, err := operation.Repository.prepare(operation.ID)
+	if err != nil {
 		return operation, err
 	}
+	operation.TempDir = tempDir
 	defer operation.Operation.cleanup()
 	operation.Deployment.PayloadPath = operation.TempDir
 	return operation, operation.Run(ctx)

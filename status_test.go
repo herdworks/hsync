@@ -40,8 +40,7 @@ func TestRepositoryStatus(t *testing.T) {
 		}
 	}
 
-	repository := Repository{Root: workspace, Config: config}
-	result, err := repository.Status()
+	result, err := StatusWithConfig(RepositoryConfig{Path: filepath.Join(workspace, "site.yaml"), Sync: config})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,6 +54,44 @@ func TestRepositoryStatus(t *testing.T) {
 	}
 	if !reflect.DeepEqual(result.Changes, want) {
 		t.Fatalf("changes = %#v, want %#v", result.Changes, want)
+	}
+}
+
+func TestRepositoryStatusWithoutBaseReportsSelectedFilesAsAdded(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(workspace, "content"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, contents := range map[string]string{
+		"content/included.txt": "included",
+		"content/ignored.txt":  "ignored",
+		"outside.txt":          "outside",
+	} {
+		if err := os.WriteFile(filepath.Join(workspace, name), []byte(contents), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	repository := Repository{
+		Root: workspace,
+		Config: &SyncConfig{
+			Include: Rules{Paths: []string{"content/**"}},
+			Ignore:  Rules{Paths: []string{"content/ignored.txt"}},
+		},
+	}
+
+	result, err := repository.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Base != "" {
+		t.Fatalf("base = %q, want empty", result.Base)
+	}
+	want := []Change{{Path: "content/included.txt", Kind: ChangeAdded}}
+	if !reflect.DeepEqual(result.Changes, want) {
+		t.Fatalf("changes = %#v, want %#v", result.Changes, want)
+	}
+	if _, err := os.Stat(filepath.Join(workspace, LocalManifestPath)); !os.IsNotExist(err) {
+		t.Fatalf("local manifest error = %v, want not exist", err)
 	}
 }
 

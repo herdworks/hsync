@@ -8,8 +8,11 @@ import (
 )
 
 // pull command
-func PullCommand() clic.Command {
-	config := GlobalConfigOption()
+func PullCommand(config hsync.ConfigManager) clic.Command {
+	if config == nil {
+		config = hsync.DefaultConfigManager{}
+	}
+	configOption := GlobalConfigOption()
 	return clic.Command{
 		Meta: clic.CommandMeta{
 			Description: "Pull remote changes into the workspace.",
@@ -18,11 +21,13 @@ func PullCommand() clic.Command {
 		Spec: clic.CommandSpec{
 			Key: "pull",
 			Options: clic.Options{
-				config.Spec.Key: &config,
+				configOption.Spec.Key: &configOption,
 			},
 			Help:      clic.DefaultHelp,
 			Validator: pullValidator,
-			Handler:   pullHandler,
+			Handler: func(execution *clic.Execution) error {
+				return pullHandler(execution, config)
+			},
 		},
 	}
 }
@@ -37,32 +42,23 @@ func pullValidator(execution *clic.Execution) error {
 		)
 	}
 
-	// validate configuration
-	if execution.Command.PositionalArguments() > 0 && execution.Options["config"].StringValue() != "" {
-		return fmt.Errorf(
-			"%s cannot combine a directory argument with -%s/--%s or $%s",
-			execution.Command.Meta.Name,
-			execution.Options["config"].Meta.ShortName,
-			execution.Options["config"].Meta.Name,
-			execution.Options["config"].Meta.EnvName,
-		)
-	}
 	return nil
 }
 
 // pull handler
-func pullHandler(execution *clic.Execution) (err error) {
+func pullHandler(execution *clic.Execution, manager hsync.ConfigManager) (err error) {
 	var operation *hsync.PullOperation
-	// Use the positional directory as the working directory, if provided.
+	directory, configPath := "", execution.Options["config"].StringValue()
 	if execution.Command.PositionalArguments() == 1 {
-		execution.WorkingDirectory = execution.Command.State.Arguments[0]
+		directory = execution.Command.State.Arguments[0]
+	} else if configPath == "" {
+		directory = execution.WorkingDirectory
 	}
-	if operation, err = hsync.Pull(
-		execution.Context,
-		execution.WorkingDirectory,
-		execution.Options["config"].StringValue(),
-		execution.Stdout,
-	); err != nil {
+	config, err := manager.Read(directory, configPath)
+	if err != nil {
+		return err
+	}
+	if operation, err = hsync.PullWithConfig(execution.Context, config, execution.Stdout); err != nil {
 		return err
 	} else if operation.Status == hsync.StatusNoop {
 		_, err := fmt.Fprintln(execution.Stdout, "Already up to date.")

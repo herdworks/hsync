@@ -4,6 +4,8 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
+	"strings"
 	"testing"
 )
 
@@ -55,7 +57,7 @@ func TestSyncConfigWithoutIncludeDoesNotScan(t *testing.T) {
 		t.Fatal("SyncConfig without include unexpectedly scans")
 	}
 	entry := ManifestEntry{Path: "content/page.txt", Size: 1, Mimetype: "text/plain"}
-	if policy.Includes(entry) {
+	if policy.includes(entry) {
 		t.Fatal("zero policy unexpectedly includes a file")
 	}
 	if !policy.Allows(entry) {
@@ -122,6 +124,108 @@ func TestLoadSyncConfig(t *testing.T) {
 	}
 	if config.Path != filename || config.Sync == nil {
 		t.Fatalf("LoadSyncConfig() = %#v", config)
+	}
+}
+
+func TestLoadSyncConfigResolvesExplicitRelativeFilenameFromDirectory(t *testing.T) {
+	root := t.TempDir()
+	filename := filepath.Join(root, "site.yaml")
+	if err := os.WriteFile(filename, []byte("sync:\n  remote: https://example.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config, err := LoadSyncConfig(root, "site.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Path != filename {
+		t.Fatalf("config path = %q, want %q", config.Path, filename)
+	}
+}
+
+func TestLoadSyncConfigRejectsExplicitConfigOutsideDirectory(t *testing.T) {
+	root := t.TempDir()
+	filename := filepath.Join(root, "site.yaml")
+	if err := os.WriteFile(filename, []byte("sync:\n  remote: https://example.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadSyncConfig(t.TempDir(), filename)
+	if err == nil || !strings.Contains(err.Error(), "belongs to") {
+		t.Fatalf("LoadSyncConfig() error = %v", err)
+	}
+}
+
+func TestDefaultConfigManager(t *testing.T) {
+	root := t.TempDir()
+	manager := DefaultConfigManager{}
+	if manager.DefaultConfigPath() != DefaultConfigPath {
+		t.Fatalf("DefaultConfigPath() = %q", manager.DefaultConfigPath())
+	}
+	if err := manager.Initialize(root, "", "https://example.com", false); err != nil {
+		t.Fatal(err)
+	}
+	config, err := manager.Read(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Path != filepath.Join(root, DefaultConfigPath) {
+		t.Fatalf("config path = %q", config.Path)
+	}
+	if config.Sync == nil || config.Sync.Remote != "https://example.com" {
+		t.Fatalf("config sync = %#v", config.Sync)
+	}
+}
+
+func TestDefaultConfigManagerInitializeVerbose(t *testing.T) {
+	root := t.TempDir()
+	manager := DefaultConfigManager{}
+	if err := manager.Initialize(root, "custom.yaml", "https://example.com", true); err != nil {
+		t.Fatal(err)
+	}
+	config, err := manager.Read(root, "custom.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.Sync == nil {
+		t.Fatal("config sync = nil")
+	}
+	if got, want := config.Sync.Include.Paths, []string{"custom.yaml"}; !slices.Equal(got, want) {
+		t.Fatalf("include paths = %v, want %v", got, want)
+	}
+	if config.Sync.MaxFileSize != DefaultMaxFileSize {
+		t.Fatalf("max file size = %q, want %q", config.Sync.MaxFileSize, DefaultMaxFileSize)
+	}
+}
+
+func TestConfiguredRemote(t *testing.T) {
+	root := t.TempDir()
+	filename := filepath.Join(root, DefaultConfigPath)
+	if err := os.WriteFile(filename, []byte("sync:\n  remote: https://example.com\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	configured, err := ConfiguredRemote(root, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured != "https://example.com" {
+		t.Fatalf("ConfiguredRemote() = %q, want configured remote", configured)
+	}
+	indexURL, err := ConfiguredRemote(root, "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if indexURL != "https://example.com/.hsync/index.json" {
+		t.Fatalf("ConfiguredRemote(index URL) = %q", indexURL)
+	}
+	config, err := (DefaultConfigManager{}).Read(root, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	configured, err = RemoteWithConfig(config, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if configured != "https://example.com" {
+		t.Fatalf("RemoteWithConfig() = %q", configured)
 	}
 }
 
