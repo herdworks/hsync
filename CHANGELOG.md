@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.7.0 (2026-08-21)
+
 * Added `ConfigManager` and `DefaultConfigManager` for cohesive
   configuration-path selection, reading, and initialization. Explicit config
   paths now resolve relative to a supplied directory and must belong to it.
