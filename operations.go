@@ -42,10 +42,11 @@ type getBlob struct {
 // PutOperation reconciles a Changeset for a declarative htup deployment.
 type PutOperation struct {
 	Operation
-	Changeset  *Changeset
-	Deployment *htup.Deployment
-	Secrets    htup.SecretsProviders
-	prepared   bool
+	Changeset      *Changeset
+	Deployment     *htup.Deployment
+	Secrets        htup.SecretsProviders
+	resolvedConfig *RepositoryConfig
+	prepared       bool
 }
 
 // ResolveRepository resolves a local repository root without requiring it to exist.
@@ -201,7 +202,12 @@ func (operation *PutOperation) prepareReconciliation(ctx context.Context) ([]byt
 		return nil, err
 	}
 	configuration := operation.Deployment
-	resolved, err := operationFromConfig(ctx, configuration.ConfigPath, configBytes, configuration.PayloadPath, operation.Remote.Client, operation.now())
+	var resolved *Operation
+	if operation.resolvedConfig != nil {
+		resolved, err = operationFromRepositoryConfig(ctx, *operation.resolvedConfig, configuration.PayloadPath, operation.Remote.Client, operation.now())
+	} else {
+		resolved, err = operationFromConfig(ctx, configuration.ConfigPath, configBytes, configuration.PayloadPath, operation.Remote.Client, operation.now())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -441,13 +447,17 @@ func operationFromConfig(ctx context.Context, configPath string, configBytes []b
 		return nil, err
 	}
 	config.Path = configPath
+	return operationFromRepositoryConfig(ctx, config, payloadPath, client, now)
+}
+
+func operationFromRepositoryConfig(ctx context.Context, config RepositoryConfig, payloadPath string, client *http.Client, now time.Time) (*Operation, error) {
 	if config.Sync == nil {
 		return nil, nil
 	}
 	if err := config.Sync.Validate(); err != nil {
 		return nil, err
 	}
-	if err := htup.ValidateDeploymentPayloadPath(configPath, payloadPath); err != nil {
+	if err := htup.ValidateDeploymentPayloadPath(config.Path, payloadPath); err != nil {
 		return nil, err
 	}
 	root := config.Directory()

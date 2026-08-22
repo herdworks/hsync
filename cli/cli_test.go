@@ -280,7 +280,7 @@ func TestStatusCommandPrintsChangesAndSummary(t *testing.T) {
 	if result.Error != nil {
 		t.Fatalf("CLI.Run(status) error = %v", result.Error)
 	}
-	want := "     added added.txt\n   deleted deleted.txt\n  modified modified.txt\n\n1 added, 1 modified, 1 deleted\n"
+	want := "       added added.txt\n     deleted deleted.txt\n    modified modified.txt\n\n1 added, 1 modified, 1 deleted\n"
 	if output.String() != want {
 		t.Fatalf("CLI.Run(status) output = %q, want %q", output.String(), want)
 	}
@@ -312,7 +312,46 @@ func TestStatusCommandVerbosePrintsIgnoredAndLimitedFiles(t *testing.T) {
 	if result.Error != nil {
 		t.Fatalf("CLI.Run(status --verbose) error = %v", result.Error)
 	}
-	want := "     added content/a-include.txt\n   ignored content/b-ignore.txt\n   limited content/c-skip.txt\n\n1 added, 0 modified, 1 ignored, 1 limited, 0 deleted\n"
+	want := "       added content/a-include.txt\n     ignored content/b-ignore.txt\n     limited content/c-skip.txt\n\n0 unmodified, 1 added, 0 modified, 1 ignored, 1 limited, 0 deleted\n"
+	if output.String() != want {
+		t.Fatalf("CLI.Run(status --verbose) output = %q, want %q", output.String(), want)
+	}
+}
+
+func TestStatusCommandVerbosePrintsUnmodifiedFiles(t *testing.T) {
+	workspace := t.TempDir()
+	entry := hsync.ManifestEntry{Path: "content/unchanged.txt", Blob: hsync.NewIdentifier([]byte("unchanged")), Size: 9, Mimetype: "text/plain"}
+	manifest, err := hsync.NewSealedManifest("/.hsync/index.json", "", []hsync.ManifestEntry{entry})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, ".hsync"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(workspace, "content"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, hsync.LocalManifestPath), manifest.Raw(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, entry.Path), []byte("unchanged"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, "content", "added.txt"), []byte("added"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	config := "sync:\n  remote: https://example.com\n  include:\n    paths: [content/**]\n"
+	if err := os.WriteFile(filepath.Join(workspace, "hsync.yaml"), []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	output := &bytes.Buffer{}
+	execution := executionAt(t, workspace)
+	execution.Stdout = output
+	result := CLI.Run(execution, clic.Arguments{"status", "--verbose"})
+	if result.Error != nil {
+		t.Fatalf("CLI.Run(status --verbose) error = %v", result.Error)
+	}
+	want := "  unmodified content/unchanged.txt\n       added content/added.txt\n\n1 unmodified, 1 added, 0 modified, 0 ignored, 0 limited, 0 deleted\n"
 	if output.String() != want {
 		t.Fatalf("CLI.Run(status --verbose) output = %q, want %q", output.String(), want)
 	}

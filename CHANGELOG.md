@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* Added `NewDeploymentWithConfig` for provider deployments that need to retain
+  a caller-resolved synchronization configuration through reconciliation.
+* Fixed `PushWithConfig` to retain caller-resolved synchronization policy
+  through reconciliation, so custom configuration-manager defaults apply to
+  initial pushes.
+* Fixed `status` to clear stale cached state when the local synchronization
+  manifest is absent.
+* Changed `status --verbose` to report unmodified selected files.
+
 ## v0.7.0 (2026-08-21)
 
 * Added `ConfigManager` and `DefaultConfigManager` for cohesive

@@ -15,7 +15,7 @@ func StatusCommand(config hsync.ConfigManager) clic.Command {
 	configOption := GlobalConfigOption()
 	verbose := clic.Option{
 		Meta: clic.OptionMeta{
-			Description: "Also list included files ignored or limited by the sync policy.",
+			Description: "Also list unmodified, ignored, and limited included files.",
 		},
 		Spec: clic.OptionSpec{
 			Key:  "verbose",
@@ -66,6 +66,14 @@ func statusHandler(execution *clic.Execution, manager hsync.ConfigManager) error
 	if err != nil {
 		return err
 	}
+	verbose := execution.Options["verbose"].BoolValue()
+	if verbose {
+		for _, entry := range result.Unmodified {
+			if _, err := fmt.Fprintf(execution.Stdout, "%12.12s %s\n", "unmodified", entry.Path); err != nil {
+				return err
+			}
+		}
+	}
 	added, modified, deleted := 0, 0, 0
 	for _, change := range result.Changes {
 		switch change.Kind {
@@ -76,24 +84,24 @@ func statusHandler(execution *clic.Execution, manager hsync.ConfigManager) error
 		case hsync.ChangeDeleted:
 			deleted++
 		}
-		if _, err := fmt.Fprintf(execution.Stdout, "%10.10s %s\n", change.Kind, change.Path); err != nil {
+		if _, err := fmt.Fprintf(execution.Stdout, "%12.12s %s\n", change.Kind, change.Path); err != nil {
 			return err
 		}
 	}
-	if !execution.Options["verbose"].BoolValue() {
+	if !verbose {
 		_, err = fmt.Fprintf(execution.Stdout, "\n%d added, %d modified, %d deleted\n", added, modified, deleted)
 		return err
 	}
 	for _, entry := range result.Ignored {
-		if _, err := fmt.Fprintf(execution.Stdout, "%10.10s %s\n", "ignored", entry.Path); err != nil {
+		if _, err := fmt.Fprintf(execution.Stdout, "%12.12s %s\n", "ignored", entry.Path); err != nil {
 			return err
 		}
 	}
 	for _, entry := range result.Limited {
-		if _, err := fmt.Fprintf(execution.Stdout, "%10.10s %s\n", "limited", entry.Path); err != nil {
+		if _, err := fmt.Fprintf(execution.Stdout, "%12.12s %s\n", "limited", entry.Path); err != nil {
 			return err
 		}
 	}
-	_, err = fmt.Fprintf(execution.Stdout, "\n%d added, %d modified, %d ignored, %d limited, %d deleted\n", added, modified, len(result.Ignored), len(result.Limited), deleted)
+	_, err = fmt.Fprintf(execution.Stdout, "\n%d unmodified, %d added, %d modified, %d ignored, %d limited, %d deleted\n", len(result.Unmodified), added, modified, len(result.Ignored), len(result.Limited), deleted)
 	return err
 }

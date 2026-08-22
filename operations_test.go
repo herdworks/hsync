@@ -61,6 +61,18 @@ func TestNewDeployment(t *testing.T) {
 	}
 }
 
+func TestNewDeploymentWithConfig(t *testing.T) {
+	provider := &htup.Deployment{}
+	config := RepositoryConfig{Path: "site.yaml", Sync: &SyncConfig{Remote: "https://example.com"}}
+	deployment := NewDeploymentWithConfig(provider, config)
+	if deployment == nil || deployment.Deployment != provider {
+		t.Fatalf("deployment = %#v, want provider deployment", deployment)
+	}
+	if deployment.resolvedConfig == nil || deployment.resolvedConfig.Path != config.Path || deployment.resolvedConfig.Sync != config.Sync {
+		t.Fatalf("resolved config = %#v, want %#v", deployment.resolvedConfig, config)
+	}
+}
+
 func TestPrepareRemovesTrackedSymlinkFromNextManifest(t *testing.T) {
 	workspace, build := t.TempDir(), t.TempDir()
 	contents := []byte("tracked")

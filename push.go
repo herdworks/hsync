@@ -65,6 +65,7 @@ func PushWithConfig(ctx context.Context, config RepositoryConfig, environment st
 	if environment == "" && len(providers) == 0 {
 		environment = DefaultEnvironment
 	}
+	resolvedConfig := config
 	operation := &PushOperation{PutOperation: PutOperation{
 		Operation: Operation{
 			ID:         uuid.NewString(),
@@ -76,7 +77,8 @@ func PushWithConfig(ctx context.Context, config RepositoryConfig, environment st
 			Environment:   environment,
 			Kind:          htup.IncrementalDeployment,
 		},
-		Secrets: secrets,
+		Secrets:        secrets,
+		resolvedConfig: &resolvedConfig,
 	}}
 	tempDir, err := operation.Repository.prepare(operation.ID)
 	if err != nil {

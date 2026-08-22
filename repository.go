@@ -99,10 +99,11 @@ type Change struct {
 // RepositoryStatus describes selected workspace changes from a repository's
 // current immutable base manifest.
 type RepositoryStatus struct {
-	Base    Identifier
-	Changes []Change
-	Ignored []ManifestEntry
-	Limited []ManifestEntry
+	Base       Identifier
+	Changes    []Change
+	Unmodified []ManifestEntry
+	Ignored    []ManifestEntry
+	Limited    []ManifestEntry
 }
 
 // Initialize writes this repository's new immutable local base manifest. It
@@ -148,6 +149,8 @@ func (repository *Repository) RefreshBase() (Manifest, error) {
 	if repository.Root == "" {
 		return Manifest{}, fmt.Errorf("%w: repository root is required for local reads", ErrInvalidState)
 	}
+	repository.Base = Manifest{}
+	repository.Local = Local{}
 	manifestPath, err := repository.manifestTarget(false)
 	if err != nil {
 		return Manifest{}, err
@@ -162,7 +165,6 @@ func (repository *Repository) RefreshBase() (Manifest, error) {
 		return Manifest{}, err
 	}
 	repository.Base = manifest
-	repository.Local = Local{}
 	return repository.Base, nil
 }
 
@@ -188,19 +190,14 @@ func (repository *Repository) Status() (RepositoryStatus, error) {
 	if repository.Root == "" {
 		return RepositoryStatus{}, fmt.Errorf("%w: repository root is required", ErrInvalidState)
 	}
-	base, err := repository.RefreshBase()
+	_, err := repository.RefreshBase()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
 		return RepositoryStatus{}, err
 	}
 	if err := repository.Snapshot(); err != nil {
 		return RepositoryStatus{}, err
 	}
-	return RepositoryStatus{
-		Base:    base.ID(),
-		Changes: compareWorkspace(base, repository.Local),
-		Ignored: repository.Local.IgnoredEntries(),
-		Limited: repository.Local.LimitedEntries(),
-	}, nil
+	return repository.classify(), nil
 }
 
 // StatusWithConfig reports workspace changes using config.
@@ -285,6 +282,35 @@ func (repository *Repository) commit(tempDir string) error {
 	repository.Base = manifest
 	repository.Local = Local{}
 	return nil
+}
+
+func (repository *Repository) classify() RepositoryStatus {
+	baseEntries := entriesByPath(repository.Base)
+	changes := make([]Change, 0, len(baseEntries)+len(repository.Local.entries))
+	unmodified := make(map[string]ManifestEntry)
+	for path, localEntry := range repository.Local.entries {
+		baseEntry, ok := baseEntries[path]
+		switch {
+		case !ok:
+			changes = append(changes, Change{Path: path, Kind: ChangeAdded})
+		case entriesEqual(baseEntry, true, localEntry, true):
+			unmodified[path] = localEntry
+		default:
+			changes = append(changes, Change{Path: path, Kind: ChangeModified})
+		}
+		delete(baseEntries, path)
+	}
+	for path := range baseEntries {
+		changes = append(changes, Change{Path: path, Kind: ChangeDeleted})
+	}
+	sort.Slice(changes, func(left, right int) bool { return changes[left].Path < changes[right].Path })
+	return RepositoryStatus{
+		Base:       repository.Base.ID(),
+		Changes:    changes,
+		Unmodified: sortedEntries(unmodified),
+		Ignored:    repository.Local.IgnoredEntries(),
+		Limited:    repository.Local.LimitedEntries(),
+	}
 }
 
 func (repository Repository) manifestTarget(write bool) (string, error) {
@@ -464,37 +490,6 @@ func (repository Repository) entries(manifestEntries []ManifestEntry) (Local, er
 		local.add(entry, contents)
 	}
 	return local, nil
-}
-
-func compareWorkspace(base Manifest, local Local) []Change {
-	baseEntries := entriesByPath(base)
-	localEntries := entriesByPath(local)
-	paths := make(map[string]struct{}, len(baseEntries)+len(localEntries))
-	for name := range baseEntries {
-		paths[name] = struct{}{}
-	}
-	for name := range localEntries {
-		paths[name] = struct{}{}
-	}
-	ordered := make([]string, 0, len(paths))
-	for name := range paths {
-		ordered = append(ordered, name)
-	}
-	sort.Strings(ordered)
-	changes := make([]Change, 0, len(ordered))
-	for _, name := range ordered {
-		baseEntry, baseOK := baseEntries[name]
-		workspaceEntry, workspaceOK := localEntries[name]
-		switch {
-		case !baseOK && workspaceOK:
-			changes = append(changes, Change{Path: name, Kind: ChangeAdded})
-		case baseOK && !workspaceOK:
-			changes = append(changes, Change{Path: name, Kind: ChangeDeleted})
-		case !entriesEqual(baseEntry, baseOK, workspaceEntry, workspaceOK):
-			changes = append(changes, Change{Path: name, Kind: ChangeModified})
-		}
-	}
-	return changes
 }
 
 func sortedEntries(entries map[string]ManifestEntry) []ManifestEntry {

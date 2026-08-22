@@ -55,6 +55,9 @@ func TestRepositoryStatus(t *testing.T) {
 	if !reflect.DeepEqual(result.Changes, want) {
 		t.Fatalf("changes = %#v, want %#v", result.Changes, want)
 	}
+	if len(result.Unmodified) != 1 || result.Unmodified[0].Path != "unchanged.txt" {
+		t.Fatalf("unmodified = %#v", result.Unmodified)
+	}
 }
 
 func TestRepositoryStatusWithoutBaseReportsSelectedFilesAsAdded(t *testing.T) {
@@ -92,6 +95,33 @@ func TestRepositoryStatusWithoutBaseReportsSelectedFilesAsAdded(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(workspace, LocalManifestPath)); !os.IsNotExist(err) {
 		t.Fatalf("local manifest error = %v, want not exist", err)
+	}
+}
+
+func TestRepositoryStatusClearsMissingCachedBase(t *testing.T) {
+	workspace := t.TempDir()
+	if err := os.WriteFile(filepath.Join(workspace, "added.txt"), []byte("added"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	base, err := NewSealedManifest("/.hsync/index.json", "", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := Repository{
+		Root:   workspace,
+		Config: &SyncConfig{Include: Rules{Paths: []string{"added.txt"}}},
+		Base:   base,
+	}
+	result, err := repository.Status()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if repository.Base.Sealed() || result.Base != "" {
+		t.Fatalf("base = %#v, result base = %q", repository.Base, result.Base)
+	}
+	want := []Change{{Path: "added.txt", Kind: ChangeAdded}}
+	if !reflect.DeepEqual(result.Changes, want) {
+		t.Fatalf("changes = %#v, want %#v", result.Changes, want)
 	}
 }
 

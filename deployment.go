@@ -18,6 +18,14 @@ func NewDeployment(provider *htup.Deployment) *Deployment {
 	return &Deployment{PutOperation: PutOperation{Deployment: provider}}
 }
 
+// NewDeploymentWithConfig creates an hsync-enabled wrapper around provider
+// deployment using an already resolved repository configuration.
+func NewDeploymentWithConfig(provider *htup.Deployment, config RepositoryConfig) *Deployment {
+	deployment := NewDeployment(provider)
+	deployment.resolvedConfig = &config
+	return deployment
+}
+
 // Run reconciles, deploys, and finalizes an hsync-enabled provider deployment.
 func (deployment *Deployment) Run(ctx context.Context) error {
 	if deployment == nil {

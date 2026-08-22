@@ -100,7 +100,7 @@ func TestPushConfigRegistersHyperctlHostingEngines(t *testing.T) {
 	}
 }
 
-func TestPushDeploysOnlyGeneratedSnapshotAndFinalizesInitialManifest(t *testing.T) {
+func TestPushWithConfigPreservesResolvedSyncRules(t *testing.T) {
 	resetPushPayloadEngine()
 	workspace := t.TempDir()
 	writeFile(t, filepath.Join(workspace, "content", "page.txt"), "page")
@@ -114,7 +114,7 @@ func TestPushDeploysOnlyGeneratedSnapshotAndFinalizesInitialManifest(t *testing.
 	}))
 	defer server.Close()
 	configPath := filepath.Join(workspace, "site.yaml")
-	config := "providers:\n  test:\n    kind: " + pushPayloadProviderKind + "\n    endpoint: https://provider.example\nenvironments:\n  hsync:\n    - test\nsync:\n  remote: " + server.URL + "\n  include:\n    paths:\n      - content/**\n"
+	config := "providers:\n  test:\n    kind: " + pushPayloadProviderKind + "\n    endpoint: https://provider.example\nenvironments:\n  hsync:\n    - test\nsync:\n  remote: " + server.URL + "\n"
 	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -122,6 +122,7 @@ func TestPushDeploysOnlyGeneratedSnapshotAndFinalizesInitialManifest(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	loaded.Sync.Include.Paths = []string{"content/**"}
 	operation, err := PushWithConfig(context.Background(), loaded, "", nil, nil)
 	if err != nil {
 		t.Fatal(err)
