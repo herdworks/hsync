@@ -74,12 +74,78 @@ func TestChangesetApplyInitializesPendingIndex(t *testing.T) {
 	var instructions struct {
 		Ignore []string `json:"ignore"`
 	}
-	if err := json.Unmarshal(changeset.Instructions, &instructions); err != nil {
+	finalRaw, err := os.ReadFile(filepath.Join(build, ".deployment.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(finalRaw, &instructions); err != nil {
 		t.Fatal(err)
 	}
 	if len(instructions.Ignore) != 1 || instructions.Ignore[0] != ".deployment/" {
 		t.Fatalf("instructions ignore = %#v, want [.deployment/]", instructions.Ignore)
 	}
+}
+
+func TestChangesetApplyMergesExistingDeploymentInstructionsIdempotently(t *testing.T) {
+	build := t.TempDir()
+	existing := []byte(`{"preconditions":[{"target":"release.json","contents":"pending.json"},{"target":".hsync/revision.json","expected":"old.json","contents":"old-pending.json"}],"ignore":["build.json",".deployment/"],"enqueue":["assets/*.css"]}`)
+	if err := os.WriteFile(filepath.Join(build, ".deployment.json"), existing, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifestRaw, manifestID, err := sealManifest(Manifest{version: ManifestVersion, indexPath: "/.hsync/revision.json", entries: []ManifestEntry{}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	changeset, err := completeChangeset(Changeset{Manifest: parseTestManifest(t, manifestRaw, manifestID), Blobs: map[Identifier][]byte{}}, nil, time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := changeset.Apply(build); err != nil {
+		t.Fatal(err)
+	}
+	if err := changeset.Apply(build); err != nil {
+		t.Fatal(err)
+	}
+	var instructions struct {
+		Preconditions []struct {
+			Target   string `json:"target"`
+			Expected string `json:"expected"`
+			Contents string `json:"contents"`
+		} `json:"preconditions"`
+		Ignore  []string `json:"ignore"`
+		Enqueue []string `json:"enqueue"`
+	}
+	finalRaw, err := os.ReadFile(filepath.Join(build, ".deployment.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(finalRaw, &instructions); err != nil {
+		t.Fatal(err)
+	}
+	if len(instructions.Preconditions) != 2 {
+		t.Fatalf("preconditions = %#v, want existing plus hsync rule", instructions.Preconditions)
+	}
+	if got := instructions.Preconditions[1]; got.Target != ".hsync/revision.json" || got.Expected != "" || got.Contents != ".deployment/pending.json" {
+		t.Fatalf("hsync precondition = %#v, want current generated rule", got)
+	}
+	if got, want := instructions.Ignore, []string{"build.json", ".deployment/"}; !equalStrings(got, want) {
+		t.Fatalf("ignore = %#v, want %#v", got, want)
+	}
+	if got, want := instructions.Enqueue, []string{"assets/*.css", ".hsync/manifests/*.json", ".hsync/revision.json"}; !equalStrings(got, want) {
+		t.Fatalf("enqueue = %#v, want %#v", got, want)
+	}
+}
+
+func equalStrings(got, want []string) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestChangesetApplyRetainsObservedIndexBytes(t *testing.T) {

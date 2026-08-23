@@ -7,6 +7,8 @@ import (
 	"path"
 	"strings"
 	"time"
+
+	"github.com/herdworks/htup"
 )
 
 // Changeset is the exact set of hsync files for one publication attempt. Its
@@ -64,7 +66,11 @@ func (changeset Changeset) Apply(root string) error {
 	if err := writePayloadFile(root, syncRelative, changeset.CleanIndex); err != nil {
 		return err
 	}
-	return writePayloadFile(root, ".deployment.json", changeset.Instructions)
+	instructions, err := mergeDeploymentInstructions(root, changeset.Instructions)
+	if err != nil {
+		return err
+	}
+	return writePayloadFile(root, htup.DeploymentInstructionsFile, instructions)
 }
 
 func completeChangeset(changeset Changeset, observedIndexRaw []byte, now time.Time) (*Changeset, error) {
@@ -144,6 +150,57 @@ func deploymentInstructions(indexPath string, hasExpected bool) ([]byte, error) 
 		return nil, err
 	}
 	return bytes, nil
+}
+
+// mergeDeploymentInstructions preserves caller declarations while applying
+// hsync's required deployment rules. TODO: decide whether this composition
+// belongs in htup; it is not a generic merge because hsync owns and replaces
+// preconditions for its synchronization index target.
+func mergeDeploymentInstructions(root string, requiredRaw []byte) ([]byte, error) {
+	existing, err := htup.LoadDeploymentInstructions(root)
+	if err != nil {
+		return nil, err
+	}
+	var required htup.DeploymentInstructions
+	if err := json.Unmarshal(requiredRaw, &required); err != nil {
+		return nil, fmt.Errorf("decode generated deployment instructions: %w", err)
+	}
+	if err := required.Validate(); err != nil {
+		return nil, fmt.Errorf("validate generated deployment instructions: %w", err)
+	}
+	existing.Preconditions = mergePreconditions(existing.Preconditions, required.Preconditions)
+	existing.Ignore = appendUniqueStrings(existing.Ignore, required.Ignore)
+	existing.Enqueue = appendUniqueStrings(existing.Enqueue, required.Enqueue)
+	return json.Marshal(existing)
+}
+
+func mergePreconditions(current []htup.Precondition, required []htup.Precondition) []htup.Precondition {
+	requiredTargets := make(map[string]bool, len(required))
+	for _, condition := range required {
+		requiredTargets[condition.Target] = true
+	}
+	merged := make([]htup.Precondition, 0, len(current)+len(required))
+	for _, condition := range current {
+		if !requiredTargets[condition.Target] {
+			merged = append(merged, condition)
+		}
+	}
+	return append(merged, required...)
+}
+
+func appendUniqueStrings(current []string, required []string) []string {
+	seen := make(map[string]bool, len(current))
+	for _, value := range current {
+		seen[value] = true
+	}
+	for _, value := range required {
+		if seen[value] {
+			continue
+		}
+		seen[value] = true
+		current = append(current, value)
+	}
+	return current
 }
 
 func writePayloadFile(root, relative string, contents []byte) error {
