@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.7.2 (2026-08-22)
+
 * Changed changeset application to merge existing `.deployment.json`
   declarations with hsync's required rules idempotently, preserving configured
   artifact exclusions while updating the synchronization-index precondition.
