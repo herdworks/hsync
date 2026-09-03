@@ -3,6 +3,7 @@ package hsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,19 @@ import (
 	"sync"
 	"testing"
 )
+
+type cancelAfterFirstCheckContext struct {
+	context.Context
+	checks int
+}
+
+func (ctx *cancelAfterFirstCheckContext) Err() error {
+	ctx.checks++
+	if ctx.checks > 1 {
+		return context.Canceled
+	}
+	return nil
+}
 
 func TestRepositoryResetRestoresTrackedFilesAndPreservesUntracked(t *testing.T) {
 	checkout := t.TempDir()
@@ -147,6 +161,39 @@ func TestRepositoryResetNoopDoesNotReadRemote(t *testing.T) {
 	}
 	if result.Status != "noop" || result.Files != 0 {
 		t.Fatalf("result = %#v", result)
+	}
+}
+
+func TestResetTargetsStopWhenCancelled(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := resetTargets(ctx, t.TempDir(), []ManifestEntry{{Path: "content/page.txt"}})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("resetTargets() error = %v, want context canceled", err)
+	}
+}
+
+func TestResetWritesPreserveRemainingFilesAfterCancellation(t *testing.T) {
+	root, staging := t.TempDir(), t.TempDir()
+	entries := []ManifestEntry{{Path: "content/first.txt"}, {Path: "content/second.txt"}}
+	for _, entry := range entries {
+		writeResetTestFile(t, staging, entry.Path, []byte("reset "+entry.Path))
+		writeResetTestFile(t, root, entry.Path, []byte("local "+entry.Path))
+	}
+	targets, err := resetTargets(context.Background(), root, entries)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := &cancelAfterFirstCheckContext{Context: context.Background()}
+	err = writeResetEntries(ctx, root, staging, entries, targets)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("writeResetEntries() error = %v, want context canceled", err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(root, "content", "first.txt")); err != nil || string(contents) != "reset content/first.txt" {
+		t.Fatalf("first file = %q, %v; want reset contents", contents, err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(root, "content", "second.txt")); err != nil || string(contents) != "local content/second.txt" {
+		t.Fatalf("second file = %q, %v; want preserved local contents", contents, err)
 	}
 }
 

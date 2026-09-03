@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+* **Fixed:** Download, pull, and reset now check cancellation after blob
+  downloads and between local removals, target validation, and writes.
+  Cancellation stops remaining work; completed writes and removals are
+  preserved.
+
 ## v0.7.2 (2026-08-22)
 
 * Changed changeset application to merge existing `.deployment.json`

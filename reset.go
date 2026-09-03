@@ -60,22 +60,12 @@ func (operation *ResetOperation) Run(ctx context.Context) error {
 	if err := operation.getEntries(ctx, staging, entries); err != nil {
 		return err
 	}
-	targets := make(map[string]string, len(entries))
-	for _, entry := range entries {
-		target, err := safeWriteTarget(operation.Repository.Root, entry.Path)
-		if err != nil {
-			return err
-		}
-		targets[entry.Path] = target
+	targets, err := resetTargets(ctx, operation.Repository.Root, entries)
+	if err != nil {
+		return err
 	}
-	for _, entry := range entries {
-		contents, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(entry.Path)))
-		if err != nil {
-			return err
-		}
-		if err := writeResetFile(operation.Repository.Root, targets[entry.Path], contents); err != nil {
-			return err
-		}
+	if err := writeResetEntries(ctx, operation.Repository.Root, staging, entries, targets); err != nil {
+		return err
 	}
 	if err := operation.log("downloaded %d files in %.3f seconds", len(entries), time.Since(started).Seconds()); err != nil {
 		return err
@@ -110,6 +100,37 @@ func (repository Repository) resetCandidates(entries []ManifestEntry) ([]Manifes
 	}
 	sort.Slice(candidates, func(left, right int) bool { return candidates[left].Path < candidates[right].Path })
 	return candidates, nil
+}
+
+func resetTargets(ctx context.Context, root string, entries []ManifestEntry) (targets map[string]string, err error) {
+	targets = make(map[string]string, len(entries))
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		target, err := safeWriteTarget(root, entry.Path)
+		if err != nil {
+			return nil, err
+		}
+		targets[entry.Path] = target
+	}
+	return targets, nil
+}
+
+func writeResetEntries(ctx context.Context, root, staging string, entries []ManifestEntry, targets map[string]string) (err error) {
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		contents, err := os.ReadFile(filepath.Join(staging, filepath.FromSlash(entry.Path)))
+		if err != nil {
+			return err
+		}
+		if err := writeResetFile(root, targets[entry.Path], contents); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // Reset loads or discovers synchronization configuration, constructs and runs

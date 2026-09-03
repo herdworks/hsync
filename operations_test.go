@@ -1,19 +1,66 @@
 package hsync
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/herdworks/htup"
 )
+
+type cancelOnWrite struct {
+	cancel context.CancelFunc
+	marker string
+	once   sync.Once
+}
+
+type staticTransport struct {
+	cancel   context.CancelFunc
+	contents []byte
+}
+
+func (writer *cancelOnWrite) Write(value []byte) (count int, err error) {
+	if strings.Contains(string(value), writer.marker) {
+		writer.once.Do(writer.cancel)
+	}
+	return len(value), nil
+}
+
+func (transport staticTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Body:       &cancelOnEOFBody{reader: bytes.NewReader(transport.contents), cancel: transport.cancel},
+		Header:     make(http.Header),
+	}, nil
+}
+
+type cancelOnEOFBody struct {
+	cancel context.CancelFunc
+	reader *bytes.Reader
+}
+
+func (body *cancelOnEOFBody) Read(value []byte) (count int, err error) {
+	count, err = body.reader.Read(value)
+	if err == io.EOF {
+		body.cancel()
+	}
+	return count, err
+}
+
+func (*cancelOnEOFBody) Close() error {
+	return nil
+}
 
 func TestPrepareInitialDeployment(t *testing.T) {
 	workspace := t.TempDir()
@@ -50,6 +97,26 @@ func TestPrepareInitialDeployment(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(build, ".sync", "latest.json")); err != nil {
 		t.Fatalf("clean index: %v", err)
+	}
+}
+
+func TestGetEntriesCancellationAfterBlobReadDoesNotWriteFile(t *testing.T) {
+	root := t.TempDir()
+	contents := []byte("contents")
+	entry := ManifestEntry{Path: "content/page.txt", Blob: NewIdentifier(contents), Size: int64(len(contents))}
+	ctx, cancel := context.WithCancel(context.Background())
+	indexURL, err := url.Parse("https://example.com/.sync/latest.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	operation := &GetOperation{Operation: Operation{
+		Remote: Remote{IndexURL: indexURL, Client: &http.Client{Transport: staticTransport{cancel: cancel, contents: contents}}},
+	}}
+	if err := operation.getEntries(ctx, root, []ManifestEntry{entry}); !errors.Is(err, context.Canceled) {
+		t.Fatalf("getEntries() error = %v, want context canceled", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, filepath.FromSlash(entry.Path))); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("materialized file = %v, want absent", err)
 	}
 }
 

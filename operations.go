@@ -134,6 +134,9 @@ func (operation *GetOperation) getEntries(ctx context.Context, root string, entr
 					if err != nil {
 						return fmt.Errorf("read blob %s: %w", entry.Blob, err)
 					}
+					if err := groupCtx.Err(); err != nil {
+						return err
+					}
 					if int64(len(contents)) != entry.Size {
 						return fmt.Errorf("%w: blob %s size differs from manifest", ErrInvalidState, entry.Blob)
 					}

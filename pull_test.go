@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -142,6 +143,27 @@ func TestPullLogsDeletedFiles(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(checkout, "content", "removed.txt")); !os.IsNotExist(err) {
 		t.Fatalf("removed file = %v, want absent", err)
+	}
+}
+
+func TestPullCancellationPreservesRemainingFiles(t *testing.T) {
+	checkout := t.TempDir()
+	for _, path := range []string{"content/first.txt", "content/second.txt"} {
+		if err := writeRepositoryFile(checkout, path, []byte(path)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	operation := &GetOperation{Operation: Operation{Writer: &cancelOnWrite{cancel: cancel, marker: "file content/first.txt deleted"}}}
+	err := materializeReconciliationPlan(ctx, checkout, ReconciliationPlan{Removes: []string{"content/first.txt", "content/second.txt"}}, operation)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("materializeReconciliationPlan() error = %v, want context canceled", err)
+	}
+	if _, err := os.Stat(filepath.Join(checkout, "content", "first.txt")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("first file = %v, want absent", err)
+	}
+	if contents, err := os.ReadFile(filepath.Join(checkout, "content", "second.txt")); err != nil || string(contents) != "content/second.txt" {
+		t.Fatalf("second file = %q, %v; want preserved", contents, err)
 	}
 }
 

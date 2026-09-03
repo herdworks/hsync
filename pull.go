@@ -105,6 +105,9 @@ func materializeReconciliationPlan(ctx context.Context, root string, plan Reconc
 		return err
 	}
 	for _, path := range plan.Removes {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		filename, err := safeWriteTarget(root, path)
 		if err != nil {
 			return err
