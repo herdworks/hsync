@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.7.3 (2026-09-02)
+
 * **Fixed:** Download, pull, and reset now check cancellation after blob
   downloads and between local removals, target validation, and writes.
   Cancellation stops remaining work; completed writes and removals are
