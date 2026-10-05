@@ -6,6 +6,6 @@ import (
 
 var (
 	LibName           = "hsync"
-	LibVersion        = "v0.7.3"
-	LibReleaseDate, _ = time.Parse(time.RFC3339, "2026-09-02T17:00:00-07:00") // Usage: LibReleaseDate.Format(time.RFC3339)
+	LibVersion        = "v0.7.4"
+	LibReleaseDate, _ = time.Parse(time.RFC3339, "2026-10-05T08:00:00-07:00") // Usage: LibReleaseDate.Format(time.RFC3339)
 )

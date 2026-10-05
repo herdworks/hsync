@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## Unreleased
 
+## v0.7.4 (2026-10-05)
+
 * Changed hsync-enabled deployments to skip synchronization reconciliation when
   `sync.remote` is omitted or empty, while continuing provider deployment.
   Direct synchronization operations still require a valid remote.
