@@ -549,6 +549,31 @@ func TestDeploymentUsesEnvironmentFromConfig(t *testing.T) {
 	}
 }
 
+func TestDeploymentSkipsReconciliationForEmptyResolvedRemote(t *testing.T) {
+	resetFacadeEngine()
+	workspace, payload := t.TempDir(), t.TempDir()
+	writeFile(t, filepath.Join(payload, "index.html"), "page")
+	configPath := filepath.Join(workspace, "site.yaml")
+	config := "providers:\n  test:\n    kind: " + facadeProviderKind + "\n    endpoint: https://provider.example\nenvironments:\n  production:\n    - test\nsync: {}\n"
+	if err := os.WriteFile(configPath, []byte(config), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	deployment := testPutOperation(configPath, payload, nil, nil, "production", htup.CompleteDeployment, nil)
+	deployment.resolvedConfig = &RepositoryConfig{Path: configPath, Sync: &SyncConfig{}}
+	if err := executePutOperation(context.Background(), deployment); err != nil {
+		t.Fatal(err)
+	}
+	if facadeEngine.calls != 1 || deployment.ProviderStatus() != htup.DeploymentSucceeded {
+		t.Fatalf("calls = %d, deployment status = %q", facadeEngine.calls, deployment.ProviderStatus())
+	}
+	if deployment.Changeset != nil || deployment.Status != "" {
+		t.Fatalf("synchronization state = (%#v, %q), want no reconciliation", deployment.Changeset, deployment.Status)
+	}
+	if _, err := os.Stat(filepath.Join(payload, ".sync")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("synchronization artifact = %v, want absent", err)
+	}
+}
+
 func TestDeploymentUsesHsyncEnvironmentByDefault(t *testing.T) {
 	resetFacadeEngine()
 	workspace, payload := t.TempDir(), t.TempDir()

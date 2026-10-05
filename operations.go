@@ -454,7 +454,7 @@ func operationFromConfig(ctx context.Context, configPath string, configBytes []b
 }
 
 func operationFromRepositoryConfig(ctx context.Context, config RepositoryConfig, payloadPath string, client *http.Client, now time.Time) (*Operation, error) {
-	if config.Sync == nil {
+	if config.Sync == nil || config.Sync.Remote == "" {
 		return nil, nil
 	}
 	if err := config.Sync.Validate(); err != nil {
